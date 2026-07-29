@@ -1,0 +1,44 @@
+{{- if .Values.serviceAccount.create -}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "kubetask.serviceAccountName" . }}
+  labels:
+    {{- include "kubetask.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubetask.fullname" . }}-controller
+  labels:
+    {{- include "kubetask.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["kubetask.kubetask.io"]
+    resources: ["tasks"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["kubetask.kubetask.io"]
+    resources: ["tasks/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: ["kubetask.kubetask.io"]
+    resources: ["tasks/finalizers"]
+    verbs: ["update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kubetask.fullname" . }}-controller
+  labels:
+    {{- include "kubetask.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubetask.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "kubetask.fullname" . }}-controller
+  apiGroup: rbac.authorization.k8s.io
+{{- end -}}

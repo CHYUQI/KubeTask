@@ -1,0 +1,14 @@
+apiVersion: v2
+name: kubetask
+description: KubeTask — 云原生智能任务调度平台
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - kubernetes
+  - cronjob
+  - scheduler
+  - task
+home: https://github.com/kubetask/kubetask
+sources:
+  - https://github.com/kubetask/kubetask

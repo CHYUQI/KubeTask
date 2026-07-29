@@ -23,7 +23,9 @@ import (
 const taskFinalizer = "kubetask.kubetask.io/finalizer"
 
 type TaskReconciler struct {
+	//embed the client.Client interface to provide methods for interacting with the Kubernetes API server. 
 	client.Client
+	
 	Scheme *runtime.Scheme
 }
 
@@ -33,8 +35,10 @@ type TaskReconciler struct {
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 
 func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	// initialize logger
 	log := log.FromContext(ctx)
 
+	// Fetch the Task instance
 	task := &kubetaskv1.Task{}
 	if err := r.Get(ctx, req.NamespacedName, task); err != nil {
 		if errors.IsNotFound(err) {
@@ -44,12 +48,15 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 
+	// Log the current phase of the Task
 	log.Info("Reconciling Task", "name", task.Name, "phase", task.Status.Phase)
 
+	// handle deletion if the Task is marked for deletion
 	if !task.DeletionTimestamp.IsZero() {
 		return r.handleDeletion(ctx, task)
 	}
 
+	// handle finalizer: add if not present,for deletion handling
 	if !controllerutil.ContainsFinalizer(task, taskFinalizer) {
 		controllerutil.AddFinalizer(task, taskFinalizer)
 		if err := r.Update(ctx, task); err != nil {
@@ -58,10 +65,12 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil
 	}
 
+	// Handle suspension 
 	if task.Spec.Suspend != nil && *task.Spec.Suspend {
 		return r.handleSuspend(ctx, task)
 	}
 
+	// handle 3 kinds of Task type
 	switch task.Spec.Type {
 	case kubetaskv1.TaskTypeOneTime:
 		return r.handleOneTime(ctx, task)
@@ -74,7 +83,9 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 }
 
+
 func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// return a new controller managed by the manager, watching for Task resources and owning Job resources
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&kubetaskv1.Task{}).
 		Owns(&batchv1.Job{}).
@@ -312,7 +323,7 @@ func (r *TaskReconciler) constructJob(task *kubetaskv1.Task) (*batchv1.Job, erro
 // Concurrency control
 // =============================================================================
 
-func (r *TaskReconciler) concurrencyAllowed(ctx context.Context, task *kubetaskv1.Task, nextTime time.Time) bool {
+func (r *TaskReconciler) concurrencyAllowed(ctx context.Context, task *kubetaskv1.Task, _ time.Time) bool {
 	log := log.FromContext(ctx)
 
 	jobs := &batchv1.JobList{}

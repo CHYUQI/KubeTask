@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"k8s.io/client-go/kubernetes"
@@ -13,6 +15,7 @@ import (
 type Router struct {
 	engine *gin.Engine
 	addr   string
+	server *http.Server
 }
 
 func NewRouter(k8sClient client.Client, clientset kubernetes.Interface, addr string) *Router {
@@ -48,5 +51,15 @@ func NewRouter(k8sClient client.Client, clientset kubernetes.Interface, addr str
 }
 
 func (r *Router) Run() error {
-	return r.engine.Run(r.addr)
+	r.server = &http.Server{
+		Addr:    r.addr,
+		Handler: r.engine,
+	}
+	return r.server.ListenAndServe()
+}
+
+func (r *Router) Shutdown(timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return r.server.Shutdown(ctx)
 }

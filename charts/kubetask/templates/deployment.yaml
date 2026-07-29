@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubetask.fullname" . }}-controller
+  labels:
+    {{- include "kubetask.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kubetask.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: controller
+  template:
+    metadata:
+      labels:
+        {{- include "kubetask.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: controller
+    spec:
+      serviceAccountName: {{ include "kubetask.serviceAccountName" . }}
+      containers:
+      - name: manager
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        args:
+          - --config=/etc/kubetask/config.yaml
+        ports:
+          - name: http
+            containerPort: {{ .Values.api.port }}
+            protocol: TCP
+          - name: metrics
+            containerPort: {{ .Values.metrics.port }}
+            protocol: TCP
+        env:
+          - name: KUBETASK_LOG_LEVEL
+            value: {{ .Values.config.logLevel | quote }}
+          - name: KUBETASK_LOG_FORMAT
+            value: {{ .Values.config.logFormat | quote }}
+        volumeMounts:
+          - name: config
+            mountPath: /etc/kubetask
+            readOnly: true
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: {{ .Values.metrics.port }}
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: {{ .Values.metrics.port }}
+          initialDelaySeconds: 3
+          periodSeconds: 5
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "kubetask.fullname" . }}-config

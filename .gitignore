@@ -1,30 +1,21 @@
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-bin/*
-Dockerfile.cross
+# 依赖
+node_modules/
 
-# Test binary, built with `go test -c`
-*.test
+# 构建产物
+bin/manager.exe
+web/dist/
 
-# Output of the go coverage tool, specifically when used with LiteIDE
-*.out
+# envtest 二进制 (100MB+)
+bin/k8s/
 
-# Go workspace file
-go.work
+# IDE
+.vscode/
+.idea/
 
-# Kubernetes Generated files - skip generated files, except for vendored files
-!vendor/**/zz_generated.*
+# OS
+.DS_Store
+Thumbs.db
 
-# editor and IDE paraphernalia
-.idea
-.vscode
-*.swp
-*.swo
-*~
-
-# Kubeconfig might contain secrets
-*.kubeconfig
+# 临时文件
+*.log
+*.tmp

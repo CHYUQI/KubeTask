@@ -4,8 +4,11 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
+	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/go-logr/zapr"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
@@ -60,6 +63,15 @@ func main() {
 	}
 	setupLog.Info("Logger initialized", "level", cfg.LogLevel, "format", cfg.LogFormat)
 
+	apiAddr := fmt.Sprintf("%s:%d", cfg.APIHost, cfg.APIPort)
+
+	restCfg, err := ctrl.GetConfig()
+	if err != nil {
+		setupLog.Info("No Kubernetes cluster available, starting in standalone mode")
+		runStandalone(apiAddr)
+		return
+	}
+
 	disableHTTP2 := func(c *tls.Config) {
 		setupLog.Info("Disabling HTTP/2")
 		c.NextProtos = []string{"http/1.1"}
@@ -70,10 +82,7 @@ func main() {
 		tlsOpts = append(tlsOpts, disableHTTP2)
 	}
 
-	webhookServerOptions := webhook.Options{
-		TLSOpts: tlsOpts,
-	}
-	webhookServer := webhook.NewServer(webhookServerOptions)
+	webhookServer := webhook.NewServer(webhook.Options{TLSOpts: tlsOpts})
 
 	metricsServerOptions := metricsserver.Options{
 		BindAddress:   cfg.MetricsAddr,
@@ -85,7 +94,7 @@ func main() {
 		metricsServerOptions.FilterProvider = filters.WithAuthenticationAndAuthorization
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	mgr, err := ctrl.NewManager(restCfg, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
@@ -124,17 +133,41 @@ func main() {
 		os.Exit(1)
 	}
 
-	apiAddr := fmt.Sprintf("%s:%d", cfg.APIHost, cfg.APIPort)
 	router := api.NewRouter(mgr.GetClient(), clientset, apiAddr)
 	go func() {
 		setupLog.Info("Starting HTTP API server", "addr", apiAddr)
-		if err := router.Run(); err != nil {
+		if err := router.Run(); err != nil && err != http.ErrServerClosed {
 			setupLog.Error(err, "HTTP API server stopped")
 		}
 	}()
 
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "Failed to run manager")
+		os.Exit(1)
+	}
+
+	setupLog.Info("Shutting down HTTP API server")
+	router.Shutdown(10 * time.Second)
+}
+
+func runStandalone(apiAddr string) {
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+
+	engine.GET("/healthz", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	engine.NoRoute(func(c *gin.Context) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "no kubernetes cluster available",
+			"message": "请先连接 Kubernetes 集群。确保 ~/.kube/config 存在且集群可达。",
+		})
+	})
+
+	fmt.Printf("Standalone mode: listening on %s (no K8s cluster)\n", apiAddr)
+	if err := engine.Run(apiAddr); err != nil {
+		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
 		os.Exit(1)
 	}
 }

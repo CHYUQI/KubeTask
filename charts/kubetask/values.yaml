@@ -1,0 +1,38 @@
+replicaCount: 1
+
+image:
+  repository: kubetask/controller
+  tag: v0.1.0
+  pullPolicy: IfNotPresent
+
+api:
+  port: 8080
+  host: "0.0.0.0"
+
+metrics:
+  port: 8081
+
+config:
+  logLevel: info
+  logFormat: json
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+ingress:
+  enabled: false
+  className: ""
+  host: kubetask.local
+
+serviceAccount:
+  create: true
+  name: ""
+
+service:
+  type: ClusterIP
+  port: 8080

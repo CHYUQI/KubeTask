@@ -1,31 +1,29 @@
-# Build the manager binary
-FROM golang:1.25 AS builder
-ARG TARGETOS
-ARG TARGETARCH
+# Stage 1: 编译 Go 二进制
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /workspace
-# Copy the Go Modules manifests
-COPY go.mod go.mod
-COPY go.sum go.sum
-# cache deps before building and copying source so that we don't need to re-download as much
-# and so that source changes don't invalidate our downloaded layer
+
+# 先复制依赖文件，利用 Docker 缓存层（代码不变不重新下载）
+COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy the Go source (relies on .dockerignore to filter)
+# 复制源码并编译
 COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o manager cmd/main.go
 
-# Build
-# the GOARCH has no default value to allow the binary to be built according to the host where the command
-# was called. For example, if we call make docker-build in a local env which has the Apple Silicon M1 SO
-# the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
-# by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
+# Stage 2: 最小运行时
+FROM alpine:3.21
 
-# Use distroless as minimal base image to package the manager binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:nonroot
-WORKDIR /
+# 安装 ca-certificates（K8s API 需要 HTTPS）+ tzdata（时区）
+RUN apk --no-cache add ca-certificates tzdata
+
+WORKDIR /app
+
 COPY --from=builder /workspace/manager .
-USER 65532:65532
 
-ENTRYPOINT ["/manager"]
+# 可选配置文件目录
+RUN mkdir -p /app/config
+
+EXPOSE 8080 8081
+
+ENTRYPOINT ["/app/manager"]
