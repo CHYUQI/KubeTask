@@ -66,6 +66,9 @@ spec:
         image: controller:latest
         name: manager
         ports:
+        - containerPort: 8080
+          name: api
+          protocol: TCP
         - containerPort: 8081
           name: health
           protocol: TCP
@@ -83,8 +86,8 @@ spec:
           periodSeconds: 20
         readinessProbe:
           httpGet:
-            path: /readyz
-            port: 8081
+            path: /healthz
+            port: 8080
           initialDelaySeconds: 5
           periodSeconds: 10
         # TODO(user): Configure the resources accordingly based on the project requirements.
