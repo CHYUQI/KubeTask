@@ -44,6 +44,10 @@ func init() {
 func main() {
 	var configFile string
 	flag.StringVar(&configFile, "config", "", "Path to config file (YAML).")
+	// 以下 flag 仅用于注册（避免 flag.Parse 报错），实际值由 Viper 配置接管
+	flag.String("metrics-bind-address", "0", "The address the metrics endpoint binds to.")
+	flag.Bool("leader-elect", false, "Enable leader election for controller manager.")
+	flag.String("health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.Parse()
 
 	cfg, err := config.LoadConfig(configFile)
