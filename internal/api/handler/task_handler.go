@@ -18,8 +18,8 @@ type TaskHandler struct {
 	client client.Client
 }
 
-func NewTaskHandler(client client.Client) *TaskHandler {
-	return &TaskHandler{client: client}
+func NewTaskHandler(k8sClient client.Client) *TaskHandler {
+	return &TaskHandler{client: k8sClient}
 }
 
 // ==========================================================================

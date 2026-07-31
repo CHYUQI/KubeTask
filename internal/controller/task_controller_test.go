@@ -33,7 +33,7 @@ func newTestReconciler() *TaskReconciler {
 // ---------------------------------------------------------------------------
 func reconcileUntilStable(r *TaskReconciler, taskName string) {
 	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		_, err := r.Reconcile(ctx, req)
 		Expect(err).NotTo(HaveOccurred())
 	}
@@ -130,8 +130,7 @@ var _ = Describe("Task Controller", func() {
 		})
 
 		It("should requeue when schedule is in the future", func() {
-			task := newCronTask(taskName, "0 0 1 1 *") // once a year
-			task = &kubetaskv1.Task{
+			task := &kubetaskv1.Task{
 				ObjectMeta: metav1.ObjectMeta{Name: taskName},
 				Spec: kubetaskv1.TaskSpec{
 					Type:     kubetaskv1.TaskTypeCron,
@@ -149,7 +148,7 @@ var _ = Describe("Task Controller", func() {
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 
 			jobs := listJobs(taskName)
-			Expect(jobs.Items).To(HaveLen(0), "should not create Job before schedule")
+			Expect(jobs.Items).To(BeEmpty(), "should not create Job before schedule")
 		})
 
 		It("should set LastScheduleTime when Job is triggered", func() {
@@ -257,7 +256,7 @@ var _ = Describe("Task Controller", func() {
 			Expect(task.Status.Phase).To(Equal(kubetaskv1.TaskSuspended))
 
 			jobs := listJobs(taskName)
-			Expect(jobs.Items).To(HaveLen(0), "suspended task should not create Jobs")
+			Expect(jobs.Items).To(BeEmpty(), "suspended task should not create Jobs")
 		})
 	})
 
@@ -305,14 +304,14 @@ var _ = Describe("Task Controller", func() {
 			task := &kubetaskv1.Task{
 				ObjectMeta: metav1.ObjectMeta{Name: "construct-test"},
 				Spec: kubetaskv1.TaskSpec{
-					Type:                kubetaskv1.TaskTypeOneTime,
-					Image:               "alpine:3.20",
-					Command:             []string{"/bin/sh", "-c"},
-					Args:                []string{"echo done"},
-					BackoffLimit:        int32Ptr(5),
-					ActiveDeadlineSeconds: int64Ptr(300),
+					Type:                    kubetaskv1.TaskTypeOneTime,
+					Image:                   "alpine:3.20",
+					Command:                 []string{"/bin/sh", "-c"},
+					Args:                    []string{"echo done"},
+					BackoffLimit:            int32Ptr(5),
+					ActiveDeadlineSeconds:   int64Ptr(300),
 					TTLSecondsAfterFinished: int32Ptr(60),
-					Resources: corev1.ResourceRequirements{},
+					Resources:               corev1.ResourceRequirements{},
 				},
 			}
 
@@ -433,7 +432,7 @@ var _ = Describe("Task Controller", func() {
 
 			task = getTask(taskName)
 			now := metav1.Now()
-			for i := 0; i < 12; i++ {
+			for range 12 {
 				task.Status.ExecutionHistory = append(task.Status.ExecutionHistory, kubetaskv1.ExecutionRecord{
 					JobName:   "old-job",
 					Phase:     kubetaskv1.TaskSucceeded,
@@ -537,20 +536,20 @@ func cleanupTask(name string) {
 	}
 	if controllerutil.ContainsFinalizer(task, taskFinalizer) {
 		controllerutil.RemoveFinalizer(task, taskFinalizer)
-		k8sClient.Update(ctx, task)
+		_ = k8sClient.Update(ctx, task)
 	}
-	k8sClient.Delete(ctx, task)
+	_ = k8sClient.Delete(ctx, task)
 	// Delete orphan jobs
 	jobs := &batchv1.JobList{}
-	k8sClient.List(ctx, jobs, client.MatchingLabels{"kubetask.io/task": name})
+	_ = k8sClient.List(ctx, jobs, client.MatchingLabels{"kubetask.io/task": name})
 	for i := range jobs.Items {
-		k8sClient.Delete(ctx, &jobs.Items[i])
+		_ = k8sClient.Delete(ctx, &jobs.Items[i])
 	}
 }
 
-func int32Ptr(v int32) *int32  { return &v }
-func int64Ptr(v int64) *int64  { return &v }
-func boolPtr(v bool) *bool     { return &v }
+func int32Ptr(v int32) *int32 { return &v }
+func int64Ptr(v int64) *int64 { return &v }
+func boolPtr(v bool) *bool    { return &v }
 
 func markJobComplete(job *batchv1.Job) {
 	now := metav1.Now()

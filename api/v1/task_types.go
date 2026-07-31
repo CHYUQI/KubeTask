@@ -54,11 +54,11 @@ const (
 
 // ExecutionRecord 记录单次执行的摘要信息。
 type ExecutionRecord struct {
-	JobName    string      `json:"jobName"`
-	StartTime  metav1.Time `json:"startTime"`
-	StopTime   metav1.Time `json:"stopTime,omitempty"`
-	Phase      TaskPhase   `json:"phase"`
-	ExitCode   int32       `json:"exitCode,omitempty"`
+	JobName   string      `json:"jobName"`
+	StartTime metav1.Time `json:"startTime"`
+	StopTime  metav1.Time `json:"stopTime,omitempty"`
+	Phase     TaskPhase   `json:"phase"`
+	ExitCode  int32       `json:"exitCode,omitempty"`
 }
 
 // TaskSpec 定义 Task 的期望状态。
@@ -179,7 +179,7 @@ type TaskStatus struct {
 // Task 是 kubetask 任务调度系统的核心 API。
 // 它定义了一个可在集群中按计划、一次性或延迟执行的任务。
 type Task struct {
-	metav1.TypeMeta `json:",inline"`	
+	metav1.TypeMeta `json:",inline"`
 
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitzero"`

@@ -15,7 +15,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	ctrlLog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/robfig/cron/v3"
 )
@@ -23,9 +23,9 @@ import (
 const taskFinalizer = "kubetask.kubetask.io/finalizer"
 
 type TaskReconciler struct {
-	//embed the client.Client interface to provide methods for interacting with the Kubernetes API server. 
+	// embed the client.Client interface to provide methods for interacting with the Kubernetes API server.
 	client.Client
-	
+
 	Scheme *runtime.Scheme
 }
 
@@ -35,8 +35,7 @@ type TaskReconciler struct {
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 
 func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	// initialize logger
-	log := log.FromContext(ctx)
+	log := ctrlLog.FromContext(ctx)
 
 	// Fetch the Task instance
 	task := &kubetaskv1.Task{}
@@ -48,7 +47,6 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 
-	// Log the current phase of the Task
 	log.Info("Reconciling Task", "name", task.Name, "phase", task.Status.Phase)
 
 	// handle deletion if the Task is marked for deletion
@@ -65,7 +63,7 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil
 	}
 
-	// Handle suspension 
+	// Handle suspension
 	if task.Spec.Suspend != nil && *task.Spec.Suspend {
 		return r.handleSuspend(ctx, task)
 	}
@@ -83,7 +81,6 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 }
 
-
 func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// return a new controller managed by the manager, watching for Task resources and owning Job resources
 	return ctrl.NewControllerManagedBy(mgr).
@@ -98,7 +95,7 @@ func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // =============================================================================
 
 func (r *TaskReconciler) handleDeletion(ctx context.Context, task *kubetaskv1.Task) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	log := ctrlLog.FromContext(ctx)
 	log.Info("Handling Task deletion", "task", task.Name)
 
 	jobs := &batchv1.JobList{}
@@ -139,7 +136,7 @@ func (r *TaskReconciler) handleDeletion(ctx context.Context, task *kubetaskv1.Ta
 }
 
 func (r *TaskReconciler) handleSuspend(ctx context.Context, task *kubetaskv1.Task) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	log := ctrlLog.FromContext(ctx)
 
 	if task.Status.Phase != kubetaskv1.TaskSuspended {
 		task.Status.Phase = kubetaskv1.TaskSuspended
@@ -158,7 +155,7 @@ func (r *TaskReconciler) handleSuspend(ctx context.Context, task *kubetaskv1.Tas
 // =============================================================================
 
 func (r *TaskReconciler) handleOneTime(ctx context.Context, task *kubetaskv1.Task) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	log := ctrlLog.FromContext(ctx)
 
 	if r.jobExists(ctx, task.Name) {
 		log.Info("Job already exists for OneTime task", "task", task.Name)
@@ -169,14 +166,16 @@ func (r *TaskReconciler) handleOneTime(ctx context.Context, task *kubetaskv1.Tas
 }
 
 func (r *TaskReconciler) handleCron(ctx context.Context, task *kubetaskv1.Task) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	log := ctrlLog.FromContext(ctx)
 
 	schedule, err := cron.ParseStandard(task.Spec.Schedule)
 	if err != nil {
 		log.Error(err, "Invalid cron expression", "schedule", task.Spec.Schedule)
 		task.Status.Phase = kubetaskv1.TaskFailed
 		task.Status.Message = fmt.Sprintf("Invalid cron expression: %s", task.Spec.Schedule)
-		r.Status().Update(ctx, task)
+		if err := r.Status().Update(ctx, task); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -200,12 +199,14 @@ func (r *TaskReconciler) handleCron(ctx context.Context, task *kubetaskv1.Task) 
 }
 
 func (r *TaskReconciler) handleDelay(ctx context.Context, task *kubetaskv1.Task) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	log := ctrlLog.FromContext(ctx)
 
 	if task.Spec.Delay == nil {
 		task.Status.Phase = kubetaskv1.TaskFailed
 		task.Status.Message = "Delay task requires spec.delay"
-		r.Status().Update(ctx, task)
+		if err := r.Status().Update(ctx, task); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -231,7 +232,7 @@ func (r *TaskReconciler) handleDelay(ctx context.Context, task *kubetaskv1.Task)
 // =============================================================================
 
 func (r *TaskReconciler) createJobAndUpdateStatus(ctx context.Context, task *kubetaskv1.Task) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	log := ctrlLog.FromContext(ctx)
 
 	job, err := r.constructJob(task)
 	if err != nil {
@@ -324,7 +325,7 @@ func (r *TaskReconciler) constructJob(task *kubetaskv1.Task) (*batchv1.Job, erro
 // =============================================================================
 
 func (r *TaskReconciler) concurrencyAllowed(ctx context.Context, task *kubetaskv1.Task, _ time.Time) bool {
-	log := log.FromContext(ctx)
+	log := ctrlLog.FromContext(ctx)
 
 	jobs := &batchv1.JobList{}
 	if err := r.List(ctx, jobs, client.MatchingLabels{"kubetask.io/task": task.Name}); err != nil {
@@ -368,7 +369,7 @@ func (r *TaskReconciler) concurrencyAllowed(ctx context.Context, task *kubetaskv
 // =============================================================================
 
 func (r *TaskReconciler) syncJobStatus(ctx context.Context, task *kubetaskv1.Task) (ctrl.Result, error) {
-	log := log.FromContext(ctx)
+	log := ctrlLog.FromContext(ctx)
 
 	jobs := &batchv1.JobList{}
 	if err := r.List(ctx, jobs, client.MatchingLabels{"kubetask.io/task": task.Name}); err != nil {
@@ -376,7 +377,7 @@ func (r *TaskReconciler) syncJobStatus(ctx context.Context, task *kubetaskv1.Tas
 	}
 
 	var activeJobs []string
-	newPhase := task.Status.Phase
+	var newPhase kubetaskv1.TaskPhase
 	phaseChanged := false
 
 	for i := range jobs.Items {

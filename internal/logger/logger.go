@@ -56,5 +56,5 @@ func (l *Logger) SetLevel(level string) error {
 }
 
 func (l *Logger) Sync() {
-	l.Zap.Sync()
+	_ = l.Zap.Sync()
 }

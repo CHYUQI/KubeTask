@@ -19,7 +19,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	kubetaskv1 	"kubetask.io/kubetask/api/v1"
+	kubetaskv1 "kubetask.io/kubetask/api/v1"
 	"kubetask.io/kubetask/internal/api/handler"
 )
 
@@ -71,7 +71,7 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterSuite(func() {
-	testEnv.Stop()
+	Expect(testEnv.Stop()).To(Succeed())
 })
 
 // ==========================================================================
@@ -283,7 +283,7 @@ var _ = Describe("GET /api/v1/stats/trend", func() {
 		w := do("GET", "/api/v1/stats/trend", "")
 		Expect(w.Code).To(Equal(http.StatusOK))
 
-		var trend []map[string]interface{}
+		var trend []map[string]any
 		Expect(json.Unmarshal(w.Body.Bytes(), &trend)).To(Succeed())
 	})
 })
@@ -293,5 +293,5 @@ var _ = Describe("GET /api/v1/stats/trend", func() {
 // ==========================================================================
 func deleteTask(name string) {
 	task := &kubetaskv1.Task{ObjectMeta: metav1.ObjectMeta{Name: name}}
-	k8sClient.Delete(context.Background(), task)
+	_ = k8sClient.Delete(context.Background(), task)
 }

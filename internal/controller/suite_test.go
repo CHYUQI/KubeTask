@@ -86,7 +86,7 @@ var _ = AfterSuite(func() {
 	By("tearing down the test environment")
 	cancel()
 	if runtime.GOOS == "windows" {
-		testEnv.Stop()
+		_ = testEnv.Stop()
 		return
 	}
 	Eventually(func() error {

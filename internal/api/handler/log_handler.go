@@ -92,7 +92,7 @@ func (h *LogHandler) Stream(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to open log stream: %v", err)})
 		return
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")

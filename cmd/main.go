@@ -14,8 +14,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/kubernetes"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -147,7 +147,7 @@ func main() {
 	}
 
 	setupLog.Info("Shutting down HTTP API server")
-	router.Shutdown(10 * time.Second)
+	_ = router.Shutdown(10 * time.Second)
 }
 
 func runStandalone(apiAddr string) {
