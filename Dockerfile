@@ -26,13 +26,8 @@ FROM alpine:3.21
 # 安装 ca-certificates（K8s API 需要 HTTPS）+ tzdata（时区）
 RUN apk --no-cache add ca-certificates tzdata
 
-WORKDIR /app
-
-COPY --from=builder /workspace/manager .
-
-# 可选配置文件目录
-RUN mkdir -p /app/config
+COPY --from=builder /workspace/manager /manager
 
 EXPOSE 8080 8081
 USER 65534
-ENTRYPOINT ["/app/manager"]
+ENTRYPOINT ["/manager"]
