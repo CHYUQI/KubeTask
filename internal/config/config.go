@@ -33,9 +33,9 @@ type Config struct {
 func LoadConfig(configFile string) (*Config, error) {
 	v := viper.New()
 
-	v.SetDefault("metrics-bind-address", "0")
+	v.SetDefault("metrics-bind-address", ":8443")
 	v.SetDefault("health-probe-bind-address", ":8081")
-	v.SetDefault("leader-elect", false)
+	v.SetDefault("leader-elect", true)
 	v.SetDefault("metrics-secure", true)
 	v.SetDefault("enable-http2", false)
 
