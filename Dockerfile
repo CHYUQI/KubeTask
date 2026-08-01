@@ -1,14 +1,12 @@
 # Stage 1: 编译 Go 二进制
 FROM golang:1.25-alpine AS builder
 
-#proxy for go mod
+# 国内 Go 代理
 ENV GOPROXY=https://goproxy.cn,direct
 
-#git 
-RUN apk add --no-cache git
-
-#CA
-RUN apk add --no-cache ca-certificates
+# 使用国内 Alpine 镜像源
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
+    && apk add --no-cache git ca-certificates
 
 WORKDIR /workspace
 
@@ -23,8 +21,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o manager cmd/main.go
 # Stage 2: 最小运行时
 FROM alpine:3.21
 
-# 安装 ca-certificates（K8s API 需要 HTTPS）+ tzdata（时区）
-RUN apk --no-cache add ca-certificates tzdata
+# 国内 Alpine 镜像源 + 运行时依赖
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
+    && apk add --no-cache ca-certificates tzdata
 
 COPY --from=builder /workspace/manager /manager
 
