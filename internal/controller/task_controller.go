@@ -182,7 +182,8 @@ func (r *TaskReconciler) handleCron(ctx context.Context, task *kubetaskv1.Task) 
 	now := time.Now()
 	var nextTime time.Time
 	if task.Status.LastScheduleTime == nil {
-		nextTime = schedule.Next(now)
+		nextTime = schedule.Next(task.CreationTimestamp.Time)
+		// fix the case where the task was created in the past and the next schedule is also in the past
 	} else {
 		nextTime = schedule.Next(task.Status.LastScheduleTime.Time)
 	}
