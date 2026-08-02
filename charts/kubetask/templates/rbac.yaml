@@ -14,6 +14,9 @@ metadata:
   labels:
     {{- include "kubetask.labels" . | nindent 4 }}
 rules:
+  - apiGroups: [""]
+    resources: ["event"]
+    verbs: ["create", "patch"]
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
