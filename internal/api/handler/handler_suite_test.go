@@ -95,14 +95,14 @@ func do(method, path string, body string) *httptest.ResponseRecorder {
 	return w
 }
 
-func taskJSON(name, taskType, image string, command ...string) string {
+func taskJSON(name, image string, command ...string) string {
 	cmd, _ := json.Marshal(command)
 	return `{
 		"apiVersion": "kubetask.kubetask.io/v1",
 		"kind": "Task",
 		"metadata": { "name": "` + name + `" },
 		"spec": {
-			"type": "` + taskType + `",
+			"type": "OneTime",
 			"image": "` + image + `",
 			"command": ` + string(cmd) + `
 		}
@@ -119,7 +119,7 @@ var _ = Describe("POST /api/v1/tasks", func() {
 	})
 
 	It("should create a task and return 201", func() {
-		w := do("POST", "/api/v1/tasks", taskJSON("api-create", "OneTime", "busybox", "echo", "hi"))
+		w := do("POST", "/api/v1/tasks", taskJSON("api-create", "busybox", "echo", "hi"))
 		Expect(w.Code).To(Equal(http.StatusCreated))
 
 		var task kubetaskv1.Task
@@ -141,7 +141,7 @@ var _ = Describe("POST /api/v1/tasks", func() {
 
 var _ = Describe("GET /api/v1/tasks", func() {
 	BeforeEach(func() {
-		w := do("POST", "/api/v1/tasks", taskJSON("api-list-1", "OneTime", "busybox"))
+		w := do("POST", "/api/v1/tasks", taskJSON("api-list-1", "busybox"))
 		Expect(w.Code).To(Equal(http.StatusCreated))
 	})
 
@@ -164,7 +164,7 @@ var _ = Describe("GET /api/v1/tasks", func() {
 
 var _ = Describe("GET /api/v1/tasks/:name", func() {
 	BeforeEach(func() {
-		w := do("POST", "/api/v1/tasks", taskJSON("api-get", "OneTime", "alpine"))
+		w := do("POST", "/api/v1/tasks", taskJSON("api-get", "alpine"))
 		Expect(w.Code).To(Equal(http.StatusCreated))
 	})
 
@@ -190,7 +190,7 @@ var _ = Describe("GET /api/v1/tasks/:name", func() {
 
 var _ = Describe("PUT /api/v1/tasks/:name", func() {
 	BeforeEach(func() {
-		do("POST", "/api/v1/tasks", taskJSON("api-update", "OneTime", "alpine"))
+		do("POST", "/api/v1/tasks", taskJSON("api-update", "alpine"))
 	})
 
 	AfterEach(func() {
@@ -212,7 +212,7 @@ var _ = Describe("PUT /api/v1/tasks/:name", func() {
 
 var _ = Describe("DELETE /api/v1/tasks/:name", func() {
 	BeforeEach(func() {
-		do("POST", "/api/v1/tasks", taskJSON("api-delete", "OneTime", "busybox"))
+		do("POST", "/api/v1/tasks", taskJSON("api-delete", "busybox"))
 	})
 
 	It("should delete the task", func() {
@@ -226,7 +226,7 @@ var _ = Describe("DELETE /api/v1/tasks/:name", func() {
 
 var _ = Describe("POST /api/v1/tasks/:name/suspend + resume", func() {
 	BeforeEach(func() {
-		do("POST", "/api/v1/tasks", taskJSON("api-pause", "OneTime", "busybox"))
+		do("POST", "/api/v1/tasks", taskJSON("api-pause", "busybox"))
 	})
 
 	AfterEach(func() {
