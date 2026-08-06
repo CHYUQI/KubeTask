@@ -96,6 +96,37 @@ var _ = Describe("Task Controller", func() {
 			Expect(jobs.Items).To(HaveLen(1), "OneTime should only run once")
 		})
 
+		It("should not re-create a Job after completion and Job cleanup", func() {
+			task := newOneTimeTask(taskName)
+			createAndInitTask(task)
+
+			jobs := listJobs(taskName)
+			Expect(jobs.Items).To(HaveLen(1))
+			job := &jobs.Items[0]
+			markJobComplete(job)
+			Expect(k8sClient.Status().Update(ctx, job)).To(Succeed())
+
+			r := newTestReconciler()
+			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+			_, err := r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			task = getTask(taskName)
+			Expect(task.Status.Phase).To(Equal(kubetaskv1.TaskSucceeded))
+
+			job.Finalizers = nil
+			Expect(k8sClient.Update(ctx, job)).To(Succeed())
+			_ = k8sClient.Delete(ctx, job, client.PropagationPolicy(metav1.DeletePropagationBackground))
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: job.Name}, &batchv1.Job{})
+				return apierrors.IsNotFound(err)
+			}, 5*time.Second, 100*time.Millisecond).Should(BeTrue())
+
+			_, err = r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(listJobs(taskName).Items).To(BeEmpty())
+		})
+
 		It("should add Finalizer on first reconcile", func() {
 			task := newOneTimeTask(taskName)
 			Expect(k8sClient.Create(ctx, task)).To(Succeed())
@@ -172,6 +203,42 @@ var _ = Describe("Task Controller", func() {
 				Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 			}
 		})
+
+		It("should sync Job status into Task status", func() {
+			task := newCronTask(taskName, "0 0 1 1 *")
+			createAndInitTask(task)
+
+			job := &batchv1.Job{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      taskName + "-sync",
+					Namespace: "default",
+					Labels:    map[string]string{"kubetask.io/task": taskName},
+				},
+				Spec: batchv1.JobSpec{
+					Template: corev1.PodTemplateSpec{
+						Spec: corev1.PodSpec{
+							RestartPolicy: corev1.RestartPolicyNever,
+							Containers:    []corev1.Container{{Name: "task", Image: "busybox"}},
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, job)).To(Succeed())
+			markJobComplete(job)
+			Expect(k8sClient.Status().Update(ctx, job)).To(Succeed())
+
+			r := newTestReconciler()
+			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+			result, err := r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+
+			task = getTask(taskName)
+			Expect(task.Status.Phase).To(Equal(kubetaskv1.TaskSucceeded))
+			Expect(task.Status.Succeeded).To(Equal(int32(1)))
+			Expect(task.Status.LastCompletionTime).NotTo(BeNil())
+			Expect(task.Status.ExecutionHistory).To(HaveLen(1))
+		})
 	})
 
 	// =========================================================================
@@ -232,6 +299,40 @@ var _ = Describe("Task Controller", func() {
 
 			jobs := listJobs(taskName)
 			Expect(jobs.Items).To(HaveLen(1), "Delay should only execute once")
+		})
+
+		It("should not re-create a Job after completion and Job cleanup", func() {
+			taskName := "delay-finished"
+			defer cleanupTask(taskName)
+
+			task := newDelayTask(taskName, "0s")
+			createAndInitTask(task)
+
+			jobs := listJobs(taskName)
+			Expect(jobs.Items).To(HaveLen(1))
+			job := &jobs.Items[0]
+			markJobComplete(job)
+			Expect(k8sClient.Status().Update(ctx, job)).To(Succeed())
+
+			r := newTestReconciler()
+			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+			_, err := r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			task = getTask(taskName)
+			Expect(task.Status.Phase).To(Equal(kubetaskv1.TaskSucceeded))
+
+			job.Finalizers = nil
+			Expect(k8sClient.Update(ctx, job)).To(Succeed())
+			_ = k8sClient.Delete(ctx, job, client.PropagationPolicy(metav1.DeletePropagationBackground))
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: job.Name}, &batchv1.Job{})
+				return apierrors.IsNotFound(err)
+			}, 5*time.Second, 100*time.Millisecond).Should(BeTrue())
+
+			_, err = r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(listJobs(taskName).Items).To(BeEmpty())
 		})
 	})
 

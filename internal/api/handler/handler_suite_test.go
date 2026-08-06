@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -13,7 +14,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -45,7 +46,7 @@ var _ = BeforeSuite(func() {
 	cfg, err := testEnv.Start()
 	Expect(err).NotTo(HaveOccurred())
 
-	scheme := runtime.NewScheme()
+	scheme := k8sruntime.NewScheme()
 	Expect(kubetaskv1.AddToScheme(scheme)).To(Succeed())
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})
@@ -71,6 +72,10 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterSuite(func() {
+	if runtime.GOOS == "windows" {
+		_ = testEnv.Stop()
+		return
+	}
 	Expect(testEnv.Stop()).To(Succeed())
 })
 
@@ -125,6 +130,11 @@ var _ = Describe("POST /api/v1/tasks", func() {
 
 	It("should reject missing type", func() {
 		w := do("POST", "/api/v1/tasks", `{"metadata":{"name":"x"},"spec":{"image":"b"}}`)
+		Expect(w.Code).To(Equal(http.StatusBadRequest))
+	})
+
+	It("should reject invalid cron schedule", func() {
+		w := do("POST", "/api/v1/tasks", `{"metadata":{"name":"api-cron-invalid"},"spec":{"type":"Cron","image":"busybox","schedule":"bad"}}`)
 		Expect(w.Code).To(Equal(http.StatusBadRequest))
 	})
 })
@@ -247,7 +257,7 @@ var _ = Describe("POST /api/v1/tasks/:name/suspend + resume", func() {
 
 var _ = Describe("POST /api/v1/tasks/:name/trigger", func() {
 	BeforeEach(func() {
-		do("POST", "/api/v1/tasks", taskJSON("api-trig", "Cron", "busybox", "echo"))
+		do("POST", "/api/v1/tasks", `{"apiVersion":"kubetask.kubetask.io/v1","kind":"Task","metadata":{"name":"api-trig"},"spec":{"type":"Cron","image":"busybox","command":["echo"],"schedule":"0 0 * * *"}}`)
 	})
 
 	AfterEach(func() {

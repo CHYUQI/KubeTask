@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/robfig/cron/v3"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -48,6 +49,12 @@ func (h *TaskHandler) Create(c *gin.Context) {
 	if task.Spec.Image == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "spec.image is required"})
 		return
+	}
+	if task.Spec.Type == kubetaskv1.TaskTypeCron {
+		if _, err := cron.ParseStandard(task.Spec.Schedule); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cron expression: " + err.Error()})
+			return
+		}
 	}
 
 	if err := h.client.Create(c.Request.Context(), &task); err != nil {
@@ -153,6 +160,12 @@ func (h *TaskHandler) Update(c *gin.Context) {
 	if err := c.ShouldBindJSON(&updated); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+	if updated.Spec.Type == kubetaskv1.TaskTypeCron {
+		if _, err := cron.ParseStandard(updated.Spec.Schedule); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cron expression: " + err.Error()})
+			return
+		}
 	}
 
 	existing.Spec = updated.Spec

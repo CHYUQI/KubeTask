@@ -162,11 +162,24 @@ func (r *TaskReconciler) handleOneTime(ctx context.Context, task *kubetaskv1.Tas
 		return r.syncJobStatus(ctx, task)
 	}
 
+	if r.taskExecutionFinished(task) {
+		log.Info("OneTime task already completed, skipping", "task", task.Name)
+		return ctrl.Result{}, nil
+	}
+
 	return r.createJobAndUpdateStatus(ctx, task)
 }
 
 func (r *TaskReconciler) handleCron(ctx context.Context, task *kubetaskv1.Task) (ctrl.Result, error) {
 	log := ctrlLog.FromContext(ctx)
+
+	// Sync Job status before deciding whether to create the next Job, so Cron
+	// tasks also update execution history/completion counters.
+	if r.jobExists(ctx, task.Name) {
+		if _, err := r.syncJobStatus(ctx, task); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
 	schedule, err := cron.ParseStandard(task.Spec.Schedule)
 	if err != nil {
@@ -223,6 +236,11 @@ func (r *TaskReconciler) handleDelay(ctx context.Context, task *kubetaskv1.Task)
 	if r.jobExists(ctx, task.Name) {
 		log.Info("Job already exists for Delay task", "task", task.Name)
 		return r.syncJobStatus(ctx, task)
+	}
+
+	if r.taskExecutionFinished(task) {
+		log.Info("Delay task already completed, skipping", "task", task.Name)
+		return ctrl.Result{}, nil
 	}
 
 	return r.createJobAndUpdateStatus(ctx, task)
@@ -377,9 +395,13 @@ func (r *TaskReconciler) syncJobStatus(ctx context.Context, task *kubetaskv1.Tas
 		return ctrl.Result{}, err
 	}
 
-	var activeJobs []string
-	var newPhase kubetaskv1.TaskPhase
-	phaseChanged := false
+	activeJobs := make([]string, 0, len(jobs.Items))
+	historyIndex := make(map[string]int, len(task.Status.ExecutionHistory))
+	for i, rec := range task.Status.ExecutionHistory {
+		historyIndex[rec.JobName] = i
+	}
+
+	statusDirty := false
 
 	for i := range jobs.Items {
 		job := &jobs.Items[i]
@@ -387,42 +409,58 @@ func (r *TaskReconciler) syncJobStatus(ctx context.Context, task *kubetaskv1.Tas
 			activeJobs = append(activeJobs, job.Name)
 		}
 
-		if r.jobTransitioned(job) {
+		if !r.jobTransitioned(job) {
+			continue
+		}
+
+		record := kubetaskv1.ExecutionRecord{
+			JobName:   job.Name,
+			StartTime: job.CreationTimestamp,
+			StopTime:  metav1.Now(),
+			Phase:     r.jobPhase(job),
+		}
+
+		if idx, ok := historyIndex[job.Name]; ok {
+			if !isTerminalExecutionRecord(task.Status.ExecutionHistory[idx]) {
+				task.Status.Failed += job.Status.Failed
+				task.Status.Succeeded += job.Status.Succeeded
+				task.Status.ExecutionHistory[idx] = record
+				statusDirty = true
+			}
+		} else {
 			task.Status.Failed += job.Status.Failed
 			task.Status.Succeeded += job.Status.Succeeded
+			task.Status.ExecutionHistory = append(task.Status.ExecutionHistory, record)
+			historyIndex[job.Name] = len(task.Status.ExecutionHistory) - 1
+			statusDirty = true
+		}
 
-			task.Status.ExecutionHistory = append(task.Status.ExecutionHistory, kubetaskv1.ExecutionRecord{
-				JobName:   job.Name,
-				StartTime: job.CreationTimestamp,
-				StopTime:  metav1.Now(),
-				Phase:     r.jobPhase(job),
-			})
-
-			if len(task.Status.ExecutionHistory) > 10 {
-				task.Status.ExecutionHistory = task.Status.ExecutionHistory[len(task.Status.ExecutionHistory)-10:]
+		if job.Status.CompletionTime != nil {
+			completionTime := &metav1.Time{Time: job.Status.CompletionTime.Time}
+			if task.Status.LastCompletionTime == nil || !task.Status.LastCompletionTime.Equal(completionTime) {
+				task.Status.LastCompletionTime = completionTime
+				statusDirty = true
 			}
-
-			if job.Status.CompletionTime != nil {
-				task.Status.LastCompletionTime = &metav1.Time{Time: job.Status.CompletionTime.Time}
-			}
-
-			phaseChanged = true
 		}
 	}
 
-	task.Status.ActiveJobs = activeJobs
+	if len(task.Status.ExecutionHistory) > 10 {
+		task.Status.ExecutionHistory = task.Status.ExecutionHistory[len(task.Status.ExecutionHistory)-10:]
+		statusDirty = true
+	}
 
-	if phaseChanged || activeJobsChanged(task, activeJobs) {
-		switch {
-		case len(activeJobs) > 0:
-			newPhase = kubetaskv1.TaskRunning
-		case task.Status.Failed == 0 || task.Status.Succeeded > 0:
-			newPhase = kubetaskv1.TaskSucceeded
-		default:
-			newPhase = kubetaskv1.TaskFailed
-		}
+	if activeJobsChanged(task, activeJobs) {
+		task.Status.ActiveJobs = activeJobs
+		statusDirty = true
+	}
 
+	newPhase := taskStatusPhase(task, activeJobs)
+	if newPhase != task.Status.Phase {
 		task.Status.Phase = newPhase
+		statusDirty = true
+	}
+
+	if statusDirty {
 		if err := r.Status().Update(ctx, task); err != nil {
 			log.Error(err, "Failed to update Task status")
 			return ctrl.Result{}, err
@@ -434,17 +472,76 @@ func (r *TaskReconciler) syncJobStatus(ctx context.Context, task *kubetaskv1.Tas
 
 func (r *TaskReconciler) jobTransitioned(job *batchv1.Job) bool {
 	return job.Status.Succeeded > 0 || job.Status.Failed > 0 ||
-		job.Status.Active == 1 && job.Status.StartTime != nil
+		jobConditionTrue(job, batchv1.JobComplete) || jobConditionTrue(job, batchv1.JobFailed)
 }
 
 func (r *TaskReconciler) jobPhase(job *batchv1.Job) kubetaskv1.TaskPhase {
-	if job.Status.Succeeded > 0 {
+	if job.Status.Succeeded > 0 || jobConditionTrue(job, batchv1.JobComplete) {
 		return kubetaskv1.TaskSucceeded
 	}
-	if job.Status.Failed > 0 {
+	if job.Status.Failed > 0 || jobConditionTrue(job, batchv1.JobFailed) {
 		return kubetaskv1.TaskFailed
 	}
 	return kubetaskv1.TaskRunning
+}
+
+func jobConditionTrue(job *batchv1.Job, conditionType batchv1.JobConditionType) bool {
+	for i := range job.Status.Conditions {
+		condition := &job.Status.Conditions[i]
+		if condition.Type == conditionType && condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+func isTerminalExecutionRecord(record kubetaskv1.ExecutionRecord) bool {
+	return record.Phase == kubetaskv1.TaskSucceeded || record.Phase == kubetaskv1.TaskFailed
+}
+
+func taskStatusPhase(task *kubetaskv1.Task, activeJobs []string) kubetaskv1.TaskPhase {
+	if len(activeJobs) > 0 {
+		return kubetaskv1.TaskRunning
+	}
+	if task.Status.Succeeded > 0 {
+		return kubetaskv1.TaskSucceeded
+	}
+	if task.Status.Failed > 0 {
+		return kubetaskv1.TaskFailed
+	}
+	if task.Status.Phase == "" {
+		return kubetaskv1.TaskPending
+	}
+	return task.Status.Phase
+}
+
+func taskManuallyTriggeredAfterCompletion(task *kubetaskv1.Task) bool {
+	raw := task.Annotations["kubetask.io/last-trigger"]
+	if raw == "" {
+		return false
+	}
+	triggerTime, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return false
+	}
+	reference := task.Status.LastCompletionTime
+	if reference == nil {
+		reference = task.Status.LastStartTime
+	}
+	if reference == nil {
+		return true
+	}
+	return triggerTime.After(reference.Time)
+}
+
+func (r *TaskReconciler) taskExecutionFinished(task *kubetaskv1.Task) bool {
+	if taskManuallyTriggeredAfterCompletion(task) {
+		return false
+	}
+	if task.Status.Phase != kubetaskv1.TaskSucceeded && task.Status.Phase != kubetaskv1.TaskFailed {
+		return false
+	}
+	return task.Status.LastCompletionTime != nil || len(task.Status.ExecutionHistory) > 0
 }
 
 func activeJobsChanged(task *kubetaskv1.Task, current []string) bool {
