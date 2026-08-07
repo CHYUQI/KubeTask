@@ -20,9 +20,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -35,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
+	"kubetask.io/kubetask/internal/testutil"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -54,6 +53,8 @@ func TestControllers(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+
+	testutil.KillOrphanedEnvTestProcesses(filepath.Join("..", "..", "bin", "k8s"))
 
 	ctx, cancel = context.WithCancel(context.TODO())
 
@@ -85,13 +86,7 @@ var _ = BeforeSuite(func() {
 var _ = AfterSuite(func() {
 	By("tearing down the test environment")
 	cancel()
-	if runtime.GOOS == "windows" {
-		_ = testEnv.Stop()
-		return
-	}
-	Eventually(func() error {
-		return testEnv.Stop()
-	}, time.Minute, time.Second).Should(Succeed())
+	Expect(testutil.StopEnvTest(testEnv)).To(Succeed())
 })
 
 func getFirstFoundEnvTestBinaryDir() string {

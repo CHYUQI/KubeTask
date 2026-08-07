@@ -470,6 +470,8 @@ func (r *TaskReconciler) syncJobStatus(ctx context.Context, task *kubetaskv1.Tas
 	return ctrl.Result{}, nil
 }
 
+
+// jobTransitioned checks if the Job has transitioned to a terminal state (succeeded or failed) or has a condition indicating completion or failure.
 func (r *TaskReconciler) jobTransitioned(job *batchv1.Job) bool {
 	return job.Status.Succeeded > 0 || job.Status.Failed > 0 ||
 		jobConditionTrue(job, batchv1.JobComplete) || jobConditionTrue(job, batchv1.JobFailed)

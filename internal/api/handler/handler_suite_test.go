@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -22,6 +21,7 @@ import (
 
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
 	"kubetask.io/kubetask/internal/api/handler"
+	"kubetask.io/kubetask/internal/testutil"
 )
 
 var (
@@ -37,6 +37,8 @@ func TestAPI(t *testing.T) {
 
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+
+	testutil.KillOrphanedEnvTestProcesses(filepath.Join("..", "..", "..", "bin", "k8s"))
 
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "..", "config", "crd", "bases")},
@@ -72,11 +74,7 @@ var _ = BeforeSuite(func() {
 })
 
 var _ = AfterSuite(func() {
-	if runtime.GOOS == "windows" {
-		_ = testEnv.Stop()
-		return
-	}
-	Expect(testEnv.Stop()).To(Succeed())
+	Expect(testutil.StopEnvTest(testEnv)).To(Succeed())
 })
 
 // ==========================================================================

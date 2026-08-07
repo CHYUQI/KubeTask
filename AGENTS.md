@@ -104,19 +104,25 @@ go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.23
 $env:KUBEBUILDER_ASSETS = "<project>\bin\k8s\k8s\1.35.0-windows-amd64"
 ```
 
-### envtest AfterSuite 必须在 Windows 上特殊处理
+### envtest 在 Windows 上必须用 testutil 清理
+controller-runtime 的 `testEnv.Stop()` 内部使用 SIGTERM，而 Go 在 Windows 上不支持 SIGTERM，
+直接调用会静默失败并泄漏 etcd / kube-apiserver 进程。所有 envtest 套件统一使用
+`internal/testutil`：
+
 ```go
+// BeforeSuite: 先清掉上次异常退出残留的 envtest 进程
+testutil.KillOrphanedEnvTestProcesses(filepath.Join("..", "..", "bin", "k8s"))
+
+// AfterSuite: 正常停止并强制清理 Windows 子进程
 var _ = AfterSuite(func() {
     cancel()
-    if runtime.GOOS == "windows" {
-        testEnv.Stop()  // Windows 不支持 Unix signal，直接调用
-        return
-    }
-    Eventually(func() error {
-        return testEnv.Stop()
-    }, time.Minute, time.Second).Should(Succeed())
+    Expect(testutil.StopEnvTest(testEnv)).To(Succeed())
 })
 ```
+
+注意：`KillOrphanedEnvTestProcesses` 只清理父进程已退出、且可执行文件位于
+`bin/k8s`（或 `KUBEBUILDER_ASSETS`）下的 etcd / kube-apiserver，不会误杀并行测试套件
+或本机真实集群的进程。
 
 ### CRD 路径规则
 `go test` 的工作目录是**测试文件所在的包目录**，不是项目根目录：
