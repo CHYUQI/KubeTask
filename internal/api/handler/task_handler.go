@@ -58,6 +58,10 @@ func (h *TaskHandler) Create(c *gin.Context) {
 	}
 
 	if err := h.client.Create(c.Request.Context(), &task); err != nil {
+		if errors.IsAlreadyExists(err) {
+			c.JSON(http.StatusConflict, gin.H{"error": "task already exists"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

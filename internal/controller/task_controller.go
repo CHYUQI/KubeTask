@@ -68,6 +68,16 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return r.handleSuspend(ctx, task)
 	}
 
+	// Handle resume: reset phase if it was suspended
+	if task.Status.Phase == kubetaskv1.TaskSuspended {
+		task.Status.Phase = kubetaskv1.TaskPending
+		task.Status.Message = ""
+		if err := r.Status().Update(ctx, task); err != nil {
+			return ctrl.Result{}, err
+		}
+		log.Info("Task resumed, phase reset to Pending", "task", task.Name)
+	}
+
 	// handle 3 kinds of Task type
 	switch task.Spec.Type {
 	case kubetaskv1.TaskTypeOneTime:
@@ -145,7 +155,7 @@ func (r *TaskReconciler) handleSuspend(ctx context.Context, task *kubetaskv1.Tas
 			return ctrl.Result{}, err
 		}
 	}
-
+	
 	log.Info("Task is suspended, skipping", "task", task.Name)
 	return ctrl.Result{}, nil
 }

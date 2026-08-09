@@ -359,6 +359,25 @@ var _ = Describe("Task Controller", func() {
 			jobs := listJobs(taskName)
 			Expect(jobs.Items).To(BeEmpty(), "suspended task should not create Jobs")
 		})
+
+		It("should reset Phase to Pending after resume", func() {
+			task := newCronTask(taskName, "0 0 1 1 *")
+			task.Spec.Suspend = boolPtr(true)
+			Expect(k8sClient.Create(ctx, task)).To(Succeed())
+
+			reconcileUntilStable(newTestReconciler(), taskName)
+			Expect(getTask(taskName).Status.Phase).To(Equal(kubetaskv1.TaskSuspended))
+
+			task = getTask(taskName)
+			task.Spec.Suspend = boolPtr(false)
+			Expect(k8sClient.Update(ctx, task)).To(Succeed())
+
+			reconcileUntilStable(newTestReconciler(), taskName)
+
+			task = getTask(taskName)
+			Expect(task.Status.Phase).To(Equal(kubetaskv1.TaskPending))
+			Expect(task.Status.Message).To(BeEmpty())
+		})
 	})
 
 	// =========================================================================
