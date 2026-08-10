@@ -155,7 +155,7 @@ func (r *TaskReconciler) handleSuspend(ctx context.Context, task *kubetaskv1.Tas
 			return ctrl.Result{}, err
 		}
 	}
-	
+
 	log.Info("Task is suspended, skipping", "task", task.Name)
 	return ctrl.Result{}, nil
 }
