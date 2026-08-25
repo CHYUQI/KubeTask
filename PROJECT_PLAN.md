@@ -89,7 +89,7 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 - [ ] 任务统计 API：`GET /api/v1/stats` — 各状态数量、今日执行次数
 
 #### P1.4 Web 管理界面（第 4-5 周）
-- [ ] **技术选择**：Gin 静态文件服务 + 轻量前端（推荐 Svelte 或 Vue3 + Vite）
+- [ ] **技术选择**：Gin 静态文件服务 + 轻量前端（Vue 3 + Vite + ECharts）
 - [ ] 页面清单：
   | 页面 | 功能 |
   |------|------|
@@ -167,7 +167,7 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 - [ ] **Workflow Controller**：DAG 拓扑排序 → 按依赖关系依次/并行创建 Task
 - [ ] **状态机**：`Pending → Running → (Succeeded | Failed | Skipped)`
 - [ ] **条件分支**：依赖任务成功/失败触发不同下游
-- [ ] **前端工作流视图**：DAG 图形化展示（使用 SvelteFlow 或 Dagre 布局）
+- [ ] **前端工作流视图**：DAG 图形化展示（使用 Vue Flow 或 Dagre 布局）
 
 #### P2.2 多租户与认证（1 周）
 - [ ] **基于 K8s ServiceAccount + RBAC 的认证**
@@ -246,7 +246,7 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 │                    用户交互层                            │
 │  ┌─────────────┐  ┌──────────────┐  ┌────────────────┐ │
 │  │ Web UI      │  │ REST API     │  │ kubectl / CLI  │ │
-│  │ (Svelte)    │  │ (Gin)        │  │ (kubetask)     │ │
+│  │ (Vue 3)     │  │ (Gin)        │  │ (kubetask)     │ │
 │  └──────┬──────┘  └──────┬───────┘  └───────┬────────┘ │
 └─────────┼────────────────┼──────────────────┼──────────┘
           │                │                  │
@@ -287,7 +287,7 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 | HTTP 框架 | Gin v1.x | 高性能、中间件生态好 |
 | ORM | GORM v2 | 成熟稳定，支持 PostgreSQL |
 | 数据库 | PostgreSQL 15+ | 任务元数据持久化 |
-| 前端 | Svelte 5 + SvelteFlow | 编译型框架，包体小，构建快 |
+| 前端 | Vue 3 + Vite + Vue Flow | 渐进式框架，生态成熟，上手快 |
 | 图表 | ECharts 5 | 功能最全的可视化库 |
 | 日志 | Zap | 高性能结构化日志 |
 | 指标 | Prometheus Client | 云原生标准 |
@@ -462,11 +462,14 @@ kubetask/
 │   └── monitor/
 │       ├── metrics.go           # Prometheus Metrics
 │       └── health.go            # 健康检查
-├── web/                          # 前端源码
+├── web/                          # 前端源码（Vue 3 + Vite）
 │   ├── src/
+│   │   ├── api/
 │   │   ├── components/
+│   │   ├── layouts/
 │   │   ├── pages/
-│   │   └── App.svelte
+│   │   ├── router/
+│   │   └── App.vue
 │   ├── package.json
 │   └── vite.config.js
 ├── charts/
@@ -587,7 +590,7 @@ kubetask/
 - [ ] Workflow CRD YAML（Phase 2）
 - [ ] Controller Reconciler 实现
 - [ ] Gin REST API 实现
-- [ ] Svelte Web UI 源码
+- [ ] Vue 3 Web UI 源码
 - [ ] PostgreSQL 迁移脚本
 - [ ] Dockerfile（多阶段构建）
 - [ ] Helm Chart
@@ -673,7 +676,7 @@ kubectl apply -f examples/cron-task.yaml
 > - **可观测性**：Prometheus Metrics + Grafana + 实时日志流式查看
 > - **部署运维**：Helm Chart + k3s 一键部署，生产可用
 >
-> 技术栈：Go、Kubernetes Operator、controller-runtime、Client-Go、Gin、GORM、PostgreSQL、Svelte、Docker、Helm、Prometheus
+> 技术栈：Go、Kubernetes Operator、controller-runtime、Client-Go、Gin、GORM、PostgreSQL、Vue 3、Docker、Helm、Prometheus
 
 ### 体现的技术能力
 
@@ -682,7 +685,7 @@ kubectl apply -f examples/cron-task.yaml
 | Go 云原生开发 | CRD + Controller + Operator 完整实现 |
 | K8s 资源管控 | Job/Pod 生命周期管理、Event 系统、RBAC |
 | 系统设计 | 多集群、高可用、可扩展架构设计 |
-| 前后端全栈 | Gin API + Svelte UI + ECharts 可视化 |
+| 前后端全栈 | Gin API + Vue 3 UI + ECharts 可视化 |
 | DevOps | Docker 多阶段构建、Helm Chart、GitOps |
 | 算法应用 | 时间序列预测、拓扑排序、负载均衡 |
 
