@@ -4,7 +4,7 @@
 
 智能云原生任务调度平台 —— 基于 Kubernetes Operator 模式的轻量级分布式任务调度系统。
 
-KubeTask 用自定义资源（CRD）描述任务，由 Controller 自动将其转换为 Kubernetes Job 执行，并提供一个进程内运行的 Gin REST API 与 Vue 3 Web 管理界面。相比原生 CronJob，它提供统一的任务视图、任务状态机、执行历史、实时日志、统计趋势和可视化运维界面。
+KubeTask 用自定义资源（CRD）描述任务，由 Controller 自动将其转换为 Kubernetes Job 执行，并提供进程内运行的 Gin REST API。相比原生 CronJob，它提供统一的任务视图、任务状态机、执行历史、实时日志与统计趋势。
 
 > 定位：轻量、可扩展、易部署，适用于中小团队、边缘计算（k3s）与云原生学习实践。
 
@@ -23,7 +23,6 @@ KubeTask 用自定义资源（CRD）描述任务，由 Controller 自动将其�
   - 并发策略：`Allow` / `Forbid` / `Replace`
   - 手动触发（trigger）、暂停（suspend）、恢复（resume）
 - **REST API**：任务 CRUD、手动触发、暂停/恢复、统计、趋势、SSE 实时日志
-- **Web UI**：Vue 3 + Vite + ECharts，提供仪表盘、任务列表、详情、创建/编辑、实时日志页面
 - **SSE 流式日志**：通过 Kubernetes API 实时读取 Job Pod 日志，支持 `tail`、`sinceSeconds`、`follow`
 - **配置管理**：Flag → YAML 配置文件 → 环境变量（Viper，`KUBETASK_` 前缀）
 - **结构化日志**：Zap，支持 console / JSON 格式
@@ -36,7 +35,6 @@ KubeTask 用自定义资源（CRD）描述任务，由 Controller 自动将其�
 ```mermaid
 flowchart LR
     subgraph 用户层
-        UI[Web UI<br/>Vue 3 + ECharts]
         API[REST API<br/>Gin]
         CLI[kubectl / CR]
     end
@@ -51,7 +49,6 @@ flowchart LR
         POD[Job Pod]
     end
 
-    UI --> API
     API --> CRD
     CLI --> CRD
     CRD --> CTRL
@@ -90,7 +87,7 @@ go build -o bin/manager ./cmd/
 
 | 端口 | 用途 |
 |------|------|
-| `:8080` | REST API + Web UI（Gin） |
+| `:8080` | REST API（Gin） |
 | `:8081` | 健康检查 `/healthz`、`/readyz` |
 | `:8443` | Prometheus Metrics（默认 TLS 安全模式） |
 
@@ -116,9 +113,8 @@ helm install kubetask ./charts/kubetask \
   --set image.tag=v0.1.0 \
   --set image.pullPolicy=Never
 
-# 3. 访问
+# 3. 访问 API
 kubectl port-forward svc/kubetask 8080:8080
-# 浏览器打开 http://localhost:8080
 ```
 
 ### 创建第一个任务
@@ -141,16 +137,6 @@ EOF
 ```bash
 kubectl get task hello-kubetask -o yaml
 ```
-
-### 启动 Web UI（开发模式）
-
-```bash
-cd web
-npm install
-npm run dev
-```
-
-Vite 开发服务器运行在 `http://localhost:5173`，会自动将 `/api` 代理到 `http://localhost:8080`。
 
 ## REST API
 
@@ -299,7 +285,7 @@ kubetask/
 │   ├── controller/                 # Task Reconciler + envtest 测试
 │   ├── api/                        # Gin 路由 + Handler（CRUD / 日志 / 统计）
 │   └── testutil/                   # Windows 下 envtest 进程清理
-├── web/                            # Vue 3 + Vite + ECharts 前端
+├── web/                            # 前端源码
 ├── charts/kubetask/                # Helm Chart
 ├── deploy/k3s/                     # k3s 一键部署脚本
 ├── config/                         # Kustomize / CRD / RBAC 清单
@@ -355,7 +341,7 @@ go test ./... -count=1
 
 | 版本 | 内容 | 状态 |
 |------|------|------|
-| **v0.1.0** | MVP：Task CRD + Controller + REST API + Web UI + Helm/k3s 部署 | ✅ 当前版本 |
+| **v0.1.0** | MVP：Task CRD + Controller + REST API + Helm/k3s 部署 | ✅ 当前版本 |
 | **v0.2.0** | DAG 工作流编排（Workflow CRD）、多租户认证、Webhook/钉钉/企微告警、调度增强 | 📋 规划中 |
 | **v0.3.0** | 多集群管理（k3s + ACK 云边协同）、智能错峰调度、Prometheus + Grafana 可观测性 | 📋 规划中 |
 

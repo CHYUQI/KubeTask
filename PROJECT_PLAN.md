@@ -141,6 +141,16 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 
 ### Phase 2：进阶功能（4 周，v0.2.0）
 
+#### P2.0 前后端一体化打包（3 天，前置任务）
+- [ ] **目标**：Web UI 与后端同进程、同端口交付，Helm / k3s 部署后无需单独部署或运行前端
+- [ ] **前端构建**：Vite 产物统一输出到 `web/dist`（`npm ci && npm run build`）
+- [ ] **静态服务**：Gin 注册静态文件路由，`/` 返回 SPA 入口，`/api/*` 不受影响
+- [ ] **二进制嵌入**：Go `go:embed` 将 `web/dist` 打进 manager 二进制，运行时无需外部静态目录
+- [ ] **镜像改造**：Dockerfile 增加 Node 构建阶段（Node → Go 多阶段），最终镜像只含单个 manager 二进制
+- [ ] **部署修正**：统一 Helm Service / Ingress 指向 8080，修正 README 与 `deploy/k3s/install.sh` 中“访问 Web UI”的说明
+- [ ] **本地开发**：开发模式继续使用 `npm run dev` + Vite 代理；本地 / CI 构建需先产出 `web/dist`（写入构建说明）
+- [ ] 验收：单容器启动后，同一端口同时可用 Web UI 与 `/api/v1/*`，且镜像体积增量可接受
+
 #### P2.1 DAG 工作流编排（2 周）
 - [ ] **Workflow CRD**
   ```yaml
@@ -566,7 +576,7 @@ kubetask/
 
 | 周 | 任务 | 交付物 |
 |----|------|--------|
-| 7 | Workflow CRD + Controller | DAG 解析 + 拓扑排序 + 任务编排 |
+| 7 | 前后端一体化打包 + Workflow CRD + Controller | 单镜像部署、DAG 解析 + 拓扑排序 + 任务编排 |
 | 8 | Workflow 前端视图 | DAG 图形化显示 + 状态展示 |
 | 9 | 多租户 + RBAC + 认证 | Namespace 隔离、API Key |
 | 10 | 告警通知 + 调度增强 | Webhook/钉钉/企微通知、资源感知调度 |

@@ -4,7 +4,7 @@
 
 Smart cloud-native task scheduling platform — a lightweight distributed task scheduling system built on the Kubernetes Operator pattern.
 
-KubeTask describes tasks with a custom resource (CRD), and a controller automatically turns them into Kubernetes Jobs. It ships with an in-process Gin REST API and a Vue 3 web console. Compared with native CronJob, it provides a unified task view, task state machine, execution history, real-time logs, statistics/trends, and a visual operations UI.
+KubeTask describes tasks with a custom resource (CRD), and a controller automatically turns them into Kubernetes Jobs. It ships with an in-process Gin REST API. Compared with native CronJob, it provides a unified task view, task state machine, execution history, real-time logs, and statistics/trends.
 
 > Positioning: lightweight, extensible, and easy to deploy — suitable for small/medium teams, edge computing (k3s), and cloud-native learning.
 
@@ -23,7 +23,6 @@ KubeTask describes tasks with a custom resource (CRD), and a controller automati
   - Concurrency policies: `Allow` / `Forbid` / `Replace`
   - Manual trigger, suspend, and resume
 - **REST API**: task CRUD, trigger, suspend/resume, stats, trends, and SSE streaming logs
-- **Web UI**: Vue 3 + Vite + ECharts with dashboard, task list, detail, create/edit, and live log pages
 - **SSE streaming logs**: reads Job Pod logs in real time through the Kubernetes API with `tail`, `sinceSeconds`, and `follow` support
 - **Configuration**: Flags → YAML config file → environment variables (Viper, `KUBETASK_` prefix)
 - **Structured logging**: Zap with console / JSON formats
@@ -36,7 +35,6 @@ KubeTask describes tasks with a custom resource (CRD), and a controller automati
 ```mermaid
 flowchart LR
     subgraph User Layer
-        UI[Web UI<br/>Vue 3 + ECharts]
         API[REST API<br/>Gin]
         CLI[kubectl / CR]
     end
@@ -51,7 +49,6 @@ flowchart LR
         POD[Job Pod]
     end
 
-    UI --> API
     API --> CRD
     CLI --> CRD
     CRD --> CTRL
@@ -90,7 +87,7 @@ Default listeners:
 
 | Port | Purpose |
 |------|---------|
-| `:8080` | REST API + Web UI (Gin) |
+| `:8080` | REST API (Gin) |
 | `:8081` | Health `/healthz`, readiness `/readyz` |
 | `:8443` | Prometheus metrics (TLS secure mode by default) |
 
@@ -116,9 +113,8 @@ helm install kubetask ./charts/kubetask \
   --set image.tag=v0.1.0 \
   --set image.pullPolicy=Never
 
-# 3. Access
+# 3. Access the API
 kubectl port-forward svc/kubetask 8080:8080
-# Open http://localhost:8080 in your browser
 ```
 
 ### Create Your First Task
@@ -141,16 +137,6 @@ Inspect task status and execution history:
 ```bash
 kubectl get task hello-kubetask -o yaml
 ```
-
-### Run the Web UI (Development)
-
-```bash
-cd web
-npm install
-npm run dev
-```
-
-The Vite dev server runs at `http://localhost:5173` and proxies `/api` to `http://localhost:8080`.
 
 ## REST API
 
@@ -297,7 +283,7 @@ kubetask/
 │   ├── controller/                 # Task Reconciler + envtest suites
 │   ├── api/                        # Gin router + handlers (CRUD / logs / stats)
 │   └── testutil/                   # envtest process cleanup on Windows
-├── web/                            # Vue 3 + Vite + ECharts frontend
+├── web/                            # Frontend source
 ├── charts/kubetask/                # Helm chart
 ├── deploy/k3s/                     # k3s one-click install script
 ├── config/                         # Kustomize / CRD / RBAC manifests
@@ -353,7 +339,7 @@ go test ./... -count=1
 
 | Version | Content | Status |
 |---------|---------|--------|
-| **v0.1.0** | MVP: Task CRD + Controller + REST API + Web UI + Helm/k3s deployment | ✅ Current |
+| **v0.1.0** | MVP: Task CRD + Controller + REST API + Helm/k3s deployment | ✅ Current |
 | **v0.2.0** | DAG workflows (Workflow CRD), multi-tenancy auth, Webhook/DingTalk/WeCom alerts, scheduling enhancements | 📋 Planned |
 | **v0.3.0** | Multi-cluster management (k3s + ACK cloud-edge), smart off-peak scheduling, Prometheus + Grafana observability | 📋 Planned |
 
