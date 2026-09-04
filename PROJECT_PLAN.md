@@ -143,13 +143,16 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 
 #### P2.0 前后端一体化打包（3 天，前置任务）
 - [ ] **目标**：Web UI 与后端同进程、同端口交付，Helm / k3s 部署后无需单独部署或运行前端
-- [ ] **前端构建**：Vite 产物统一输出到 `web/dist`（`npm ci && npm run build`）
-- [ ] **静态服务**：Gin 注册静态文件路由，`/` 返回 SPA 入口，`/api/*` 不受影响
-- [ ] **二进制嵌入**：Go `go:embed` 将 `web/dist` 打进 manager 二进制，运行时无需外部静态目录
-- [ ] **镜像改造**：Dockerfile 增加 Node 构建阶段（Node → Go 多阶段），最终镜像只含单个 manager 二进制
+- [x] **前端构建**：Dockerfile 的 Node 22 构建阶段执行 `npm ci && npm run build`，产物输出到 `web/dist`
+- [x] **静态服务**：Gin NoRoute 提供静态文件与 SPA 入口，`/api/*` 不受影响；新增 `web-dir` 配置，默认 `/web/dist`
+- [x] **方案定案**：采用方案 B（静态资源随镜像分发，运行时从目录读取），否决方案 A 的 `go:embed` 单二进制方案
+- [x] **镜像改造**：Dockerfile 采用 Node → Go → Alpine 多阶段构建，并将 `web/dist` 复制到最终镜像的 `/web/dist`
 - [ ] **部署修正**：统一 Helm Service / Ingress 指向 8080，修正 README 与 `deploy/k3s/install.sh` 中“访问 Web UI”的说明
-- [ ] **本地开发**：开发模式继续使用 `npm run dev` + Vite 代理；本地 / CI 构建需先产出 `web/dist`（写入构建说明）
+- [ ] **本地开发**：开发模式继续使用 `npm run dev` + Vite 代理；Docker/CI 镜像构建由 Node 阶段自动产出 `web/dist`；本地直接运行二进制的静态目录说明在节点 2 落地后补充
 - [ ] 验收：单容器启动后，同一端口同时可用 Web UI 与 `/api/v1/*`，且镜像体积增量可接受
+
+> 2026-09-04 进展：Dockerfile 已配置为自动构建并携带 `web/dist` 静态资源；方案定案为 B（不做 go:embed）。
+> 2026-09-04 节点 2：Gin 静态服务与 `web-dir` 配置完成，`go build` / `go vet` / 全量 `go test` 通过。
 
 #### P2.1 DAG 工作流编排（2 周）
 - [ ] **Workflow CRD**
@@ -738,4 +741,4 @@ kubectl apply -f examples/cron-task.yaml
 
 ---
 
-> **版本**: v0.1.0 | **最后更新**: 2026-06-02
+> **版本**: v0.1.0 | **最后更新**: 2026-09-04

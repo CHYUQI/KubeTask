@@ -3,7 +3,7 @@ node_modules/
 
 # 构建产物
 bin/manager.exe
-web/dist/
+
 
 # envtest 二进制 (100MB+)
 bin/k8s/

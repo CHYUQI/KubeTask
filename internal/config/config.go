@@ -19,6 +19,7 @@ type Config struct {
 
 	APIPort int    `mapstructure:"api-port"`
 	APIHost string `mapstructure:"api-host"`
+	WebDir  string `mapstructure:"web-dir"`
 
 	DatabaseHost     string `mapstructure:"database-host"`
 	DatabasePort     int    `mapstructure:"database-port"`
@@ -44,6 +45,7 @@ func LoadConfig(configFile string) (*Config, error) {
 
 	v.SetDefault("api-port", 8080)
 	v.SetDefault("api-host", "0.0.0.0")
+	v.SetDefault("web-dir", "/web/dist")
 
 	v.SetDefault("database-host", "localhost")
 	v.SetDefault("database-port", 5432)

@@ -50,6 +50,11 @@ func NewRouter(k8sClient client.Client, clientset kubernetes.Interface, addr str
 	}
 }
 
+// ServeWeb mounts the built SPA onto the router's Gin engine.
+func (r *Router) ServeWeb(webRoot string) error {
+	return MountWebUI(r.engine, webRoot)
+}
+
 func (r *Router) Run() error {
 	r.server = &http.Server{
 		Addr:    r.addr,

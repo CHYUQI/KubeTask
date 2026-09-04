@@ -138,6 +138,9 @@ func main() {
 	}
 
 	router := api.NewRouter(mgr.GetClient(), clientset, apiAddr)
+	if err := router.ServeWeb(cfg.WebDir); err != nil {
+		setupLog.Info("Web UI disabled", "error", err.Error())
+	}
 	go func() {
 		setupLog.Info("Starting HTTP API server", "addr", apiAddr)
 		if err := router.Run(); err != nil && err != http.ErrServerClosed {
