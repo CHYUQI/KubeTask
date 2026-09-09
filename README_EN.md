@@ -4,7 +4,7 @@
 
 Smart cloud-native task scheduling platform — a lightweight distributed task scheduling system built on the Kubernetes Operator pattern.
 
-KubeTask describes tasks with a custom resource (CRD), and a controller automatically turns them into Kubernetes Jobs. It ships with an in-process Gin REST API. Compared with native CronJob, it provides a unified task view, task state machine, execution history, real-time logs, and statistics/trends.
+KubeTask describes tasks with a custom resource (CRD), and a controller automatically turns them into Kubernetes Jobs. A Vue 3 web console and the in-process Gin REST API ship in the same process and are served on the same port. Compared with native CronJob, it provides a unified task view, task state machine, execution history, real-time logs, statistics/trends, and a visual operations UI.
 
 > Positioning: lightweight, extensible, and easy to deploy — suitable for small/medium teams, edge computing (k3s), and cloud-native learning.
 
@@ -23,6 +23,7 @@ KubeTask describes tasks with a custom resource (CRD), and a controller automati
   - Concurrency policies: `Allow` / `Forbid` / `Replace`
   - Manual trigger, suspend, and resume
 - **REST API**: task CRUD, trigger, suspend/resume, stats, trends, and SSE streaming logs
+- **Web UI (bundled with the image)**: Vue 3 + Vite + ECharts with dashboard, task list, detail, create/edit, and live log pages; the Dockerfile builds the frontend automatically, so no separate deployment is needed
 - **SSE streaming logs**: reads Job Pod logs in real time through the Kubernetes API with `tail`, `sinceSeconds`, and `follow` support
 - **Configuration**: Flags → YAML config file → environment variables (Viper, `KUBETASK_` prefix)
 - **Structured logging**: Zap with console / JSON formats
@@ -35,6 +36,7 @@ KubeTask describes tasks with a custom resource (CRD), and a controller automati
 ```mermaid
 flowchart LR
     subgraph User Layer
+        UI[Web UI<br/>Vue 3 + ECharts]
         API[REST API<br/>Gin]
         CLI[kubectl / CR]
     end
@@ -49,6 +51,7 @@ flowchart LR
         POD[Job Pod]
     end
 
+    UI --> API
     API --> CRD
     CLI --> CRD
     CRD --> CTRL
@@ -87,11 +90,12 @@ Default listeners:
 
 | Port | Purpose |
 |------|---------|
-| `:8080` | REST API (Gin) |
+| `:8080` | Web UI + REST API (Gin, same port) |
 | `:8081` | Health `/healthz`, readiness `/readyz` |
 | `:8443` | Prometheus metrics (TLS secure mode by default) |
 
 > If no Kubernetes cluster is found, the process starts in standalone mode: only the HTTP server runs, and API routes return a 503 hint.
+> The Web UI directory is configured with `web-dir` (default `/web/dist`, bundled inside the image). When running the binary locally, build the frontend first with `cd web && npm run build` and set `KUBETASK_WEB_DIR=web/dist` to access the UI and API on the same port 8080.
 
 ### One-Command k3s Deployment
 
@@ -113,9 +117,18 @@ helm install kubetask ./charts/kubetask \
   --set image.tag=v0.1.0 \
   --set image.pullPolicy=Never
 
-# 3. Access the API
+# 3. Access the Web UI and API (same port)
 kubectl port-forward svc/kubetask 8080:8080
+# Open http://localhost:8080 in your browser
 ```
+### Verify the Deployment
+
+```bash
+curl -s http://localhost:8080/healthz          # {"status":"ok"}
+curl -s http://localhost:8080/api/v1/stats     # JSON stats
+curl -s http://localhost:8080/ | head          # SPA index.html
+```
+
 
 ### Create Your First Task
 
@@ -138,6 +151,17 @@ Inspect task status and execution history:
 kubectl get task hello-kubetask -o yaml
 ```
 
+### Run the Web UI in Development Mode
+
+The frontend source lives in `web/`. Production deployment does not need a separate frontend (the image build produces the static assets automatically); start Vite only when you want to work on the UI:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+The Vite dev server runs at `http://localhost:5173` and proxies `/api` to `http://localhost:8080`.
 ## REST API
 
 | Method | Path | Description |
@@ -252,12 +276,14 @@ metrics-secure: true
 health-probe-bind-address: ":8081"
 leader-elect: true
 enable-http2: false
+web-dir: /web/dist      # Web UI static directory (default inside the image)
 ```
 
 | Key | Env var | Default | Description |
 |-----|---------|---------|-------------|
 | `api-host` | `KUBETASK_API_HOST` | `0.0.0.0` | HTTP listen address |
 | `api-port` | `KUBETASK_API_PORT` | `8080` | HTTP port |
+| `web-dir` | `KUBETASK_WEB_DIR` | `/web/dist` | Web UI static directory; when missing, only the UI is disabled and the API keeps running |
 | `log-level` | `KUBETASK_LOG_LEVEL` | `info` | Log level |
 | `log-format` | `KUBETASK_LOG_FORMAT` | `console` | Log format |
 | `metrics-bind-address` | `KUBETASK_METRICS_BIND_ADDRESS` | `:8443` | Metrics address |
@@ -283,7 +309,7 @@ kubetask/
 │   ├── controller/                 # Task Reconciler + envtest suites
 │   ├── api/                        # Gin router + handlers (CRUD / logs / stats)
 │   └── testutil/                   # envtest process cleanup on Windows
-├── web/                            # Frontend source
+├── web/                            # Vue 3 + Vite + ECharts frontend
 ├── charts/kubetask/                # Helm chart
 ├── deploy/k3s/                     # k3s one-click install script
 ├── config/                         # Kustomize / CRD / RBAC manifests
@@ -339,7 +365,7 @@ go test ./... -count=1
 
 | Version | Content | Status |
 |---------|---------|--------|
-| **v0.1.0** | MVP: Task CRD + Controller + REST API + Helm/k3s deployment | ✅ Current |
+| **v0.1.0** | MVP: Task CRD + Controller + REST API + Web UI (same-port bundle) + Helm/k3s deployment | ✅ Current |
 | **v0.2.0** | DAG workflows (Workflow CRD), multi-tenancy auth, Webhook/DingTalk/WeCom alerts, scheduling enhancements | 📋 Planned |
 | **v0.3.0** | Multi-cluster management (k3s + ACK cloud-edge), smart off-peak scheduling, Prometheus + Grafana observability | 📋 Planned |
 
