@@ -153,6 +153,7 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 
 > 2026-09-04 进展：Dockerfile 已配置为自动构建并携带 `web/dist` 静态资源；方案定案为 B（不做 go:embed）。
 > 2026-09-04 节点 2：Gin 静态服务与 `web-dir` 配置完成，`go build` / `go vet` / 全量 `go test` 通过。
+> 2026-09-09 节点 3：本机无 Docker，容器级验收未执行；新增 `internal/api/webui_e2e_test.go`，用 envtest + 真实 TCP 端口验证同一 Router 同时服务 SPA 与 API，全量 `go test` 通过。
 
 #### P2.1 DAG 工作流编排（2 周）
 - [ ] **Workflow CRD**
