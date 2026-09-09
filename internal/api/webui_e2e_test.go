@@ -23,9 +23,9 @@ import (
 	"kubetask.io/kubetask/internal/testutil"
 )
 
-// TestSamePortWebUIAndAPI starts a real kube-apiserver via envtest, serves the
-// built web/dist and the REST API through one Router, and checks that both are
-// reachable on the same TCP address.
+// TestSamePortWebUIAndAPI starts a real kube-apiserver via envtest, serves a
+// generated SPA fixture and the REST API through one Router, and checks that
+// both are reachable on the same TCP address.
 func TestSamePortWebUIAndAPI(t *testing.T) {
 	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
 		t.Skip("KUBEBUILDER_ASSETS not set")
@@ -60,9 +60,12 @@ func TestSamePortWebUIAndAPI(t *testing.T) {
 		t.Fatalf("create clientset: %v", err)
 	}
 
+	webRoot := t.TempDir()
+	mustWrite(t, filepath.Join(webRoot, "index.html"), `<!doctype html><html><head><title>web</title></head><body><script type="module" src="/assets/index-smoke.js"></script></body></html>`)
+	mustWrite(t, filepath.Join(webRoot, "assets", "index-smoke.js"), "console.log('smoke')")
+
 	addr := freeTCPAddr(t)
 	router := NewRouter(k8sClient, clientset, addr)
-	webRoot := filepath.Join("..", "..", "web", "dist")
 	if err := router.ServeWeb(webRoot); err != nil {
 		t.Fatalf("ServeWeb(%q): %v", webRoot, err)
 	}
@@ -101,7 +104,9 @@ func TestSamePortWebUIAndAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET unknown API route: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("GET unknown API route = %d, want 404", resp.StatusCode)
 	}
@@ -122,12 +127,12 @@ func freeTCPAddr(t *testing.T) string {
 
 func waitForHealthz(t *testing.T, url string) {
 	t.Helper()
-	client := &http.Client{Timeout: 500 * time.Millisecond}
+	hc := &http.Client{Timeout: 500 * time.Millisecond}
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(url)
+		resp, err := hc.Get(url)
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				return
 			}
@@ -143,7 +148,9 @@ func getBody(t *testing.T, url string) string {
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read %s: %v", url, err)
