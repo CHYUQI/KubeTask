@@ -157,32 +157,85 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 > 2026-09-09 节点 4：README / README_EN 恢复 Web UI 与同端口交付说明，补充 `web-dir`、部署验证与开发模式；P2.0 全部验收完成。
 
 #### P2.1 DAG 工作流编排（2 周）
-- [ ] **Workflow CRD**
+- [ ] **Workflow CRD（扁平 DAG 模式，2026-09-10 定稿）**
   ```yaml
-  apiVersion: kubetask.io/v1
+  apiVersion: kubetask.kubetask.io/v1
   kind: Workflow
+  metadata:
+    name: ci-pipeline
   spec:
-    entrypoint: main
-    templates:
-    - name: main
-      dag:
-        tasks:
-        - name: build
-          template: build-job
-        - name: test
-          template: test-job
-          dependencies: [build]
-        - name: deploy
-          template: deploy-job
-          dependencies: [test]
-    - name: build-job
-      taskRef:
-        name: build-task
+    maxParallel: 4
+    tasks:
+      - name: build
+        template: go-build
+      - name: unit-test
+        dependsOn: [build]
+        template: go-test
+      - name: e2e
+        dependsOn: [build]
+        template: go-test
+      - name: notify-failure
+        dependsOn: [unit-test, e2e]
+        # 所有依赖到达终态且至少一个失败时执行
+        runOnFailure: true
+        template: notify
+    taskTemplates:
+      go-build:
+        type: OneTime
+        image: golang:1.25
+        command: ["go", "build", "./..."]
+        backoffLimit: 3
+      go-test:
+        type: OneTime
+        image: golang:1.25
+        command: ["go", "test", "./..."]
+      notify:
+        type: OneTime
+        image: curlimages/curl
+        command: ["sh", "-c", "curl -X POST $WEBHOOK"]
   ```
+- [ ] **扁平模式要点**
+  - `spec.tasks[]` 直接声明 DAG 节点（`name` + `dependsOn`），去掉 `entrypoint` / `templates[dag]` 间接层
+  - 节点执行参数二选一：`template` 引用 `spec.taskTemplates` 中的命名模板，或内联 `taskSpec`（复用 TaskSpec，CEL 约束 exactly one）
+  - `taskTemplates` 为 map 按名引用；同一模板可被多个节点复用，每次触发创建独立 Task 实例
+  - 失败分支：默认节点需依赖全部 `Succeeded` 才执行；任一依赖非成功终态则下游 `Skipped`；`runOnFailure: true` 的节点按专门规则判定（见下）
+  - 一个 Workflow CR 即一次运行，子 Task 命名 `<workflow>-<node>`，可确定性幂等创建
 - [ ] **Workflow Controller**：DAG 拓扑排序 → 按依赖关系依次/并行创建 Task
 - [ ] **状态机**：`Pending → Running → (Succeeded | Failed | Skipped)`
-- [ ] **条件分支**：依赖任务成功/失败触发不同下游
+- [ ] **失败分支**：`runOnFailure: true` 的节点等待全部依赖到达终态（`Succeeded/Failed/Skipped`）；至少一个依赖为 `Failed/Skipped` 时执行，全部成功时该节点记 `Skipped`（2026-09-15 定稿）；复杂条件表达式顺延 v0.3.0
 - [ ] **前端工作流视图**：DAG 图形化展示（使用 Vue Flow 或 Dagre 布局）
+
+**设计变更（2026-09-10）**
+
+> ~~原 Argo 式 `spec.entrypoint + spec.templates[dag]` 结构，以及 `taskRef` 引用已有 Task 的做法，已否决；改为上面的扁平 DAG 模式。~~
+
+<details>
+<summary>~~点击展开旧方案 YAML（已废弃，仅作设计演进对照）~~</summary>
+
+```yaml
+apiVersion: kubetask.kubetask.io/v1
+kind: Workflow
+spec:
+  entrypoint: main
+  templates:
+  - name: main
+    dag:
+      tasks:
+      - name: build
+        template: build-job
+      - name: test
+        template: test-job
+        dependencies: [build]
+      - name: deploy
+        template: deploy-job
+        dependencies: [test]
+  - name: build-job
+    taskRef:
+      name: build-task
+```
+
+</details>
+
 
 #### P2.2 多租户与认证（1 周）
 - [ ] **基于 K8s ServiceAccount + RBAC 的认证**
@@ -405,30 +458,67 @@ const (
 )
 ```
 
-#### Workflow CRD（Phase 2）
+#### Workflow CRD（Phase 2，扁平 DAG 模式）
+
+> ~~旧设计（`WorkflowSpec.Entrypoint` + `WorkflowTemplate.DAG` + `DAGTask`）已否决，以 P2.1 的扁平 DAG 模式为准。~~
 
 ```go
 type WorkflowSpec struct {
-    Entrypoint string              `json:"entrypoint"`
-    Templates  []WorkflowTemplate  `json:"templates"`
+    MaxParallel   int                 `json:"maxParallel,omitempty"`   // 并行节点上限，0 表示不限
+    Tasks         []WorkflowTask      `json:"tasks"`
+    TaskTemplates map[string]TaskSpec `json:"taskTemplates,omitempty"` // 命名模板，按名引用
 }
 
-type WorkflowTemplate struct {
-    Name string   `json:"name"`
-    DAG  *DAGSpec `json:"dag,omitempty"`
-    Task *TaskRef `json:"task,omitempty"`  // 引用已有 Task
+type WorkflowTask struct {
+    Name         string    `json:"name"`
+    DependsOn    []string  `json:"dependsOn,omitempty"`    // 前置节点，全部成功才执行
+    Template     string    `json:"template,omitempty"`     // 引用 taskTemplates，与 taskSpec 二选一
+    TaskSpec     *TaskSpec `json:"taskSpec,omitempty"`     // 内联执行规格，复用 TaskSpec
+    RunOnFailure bool      `json:"runOnFailure,omitempty"` // 全部依赖到达终态且至少一个为 Failed/Skipped 时执行；全部成功则本节点 Skipped
 }
 
-type DAGSpec struct {
-    Tasks []DAGTask `json:"tasks"`
+type WorkflowPhase string
+
+const (
+    WorkflowPending   WorkflowPhase = "Pending"
+    WorkflowRunning   WorkflowPhase = "Running"
+    WorkflowSucceeded WorkflowPhase = "Succeeded"
+    WorkflowFailed    WorkflowPhase = "Failed"
+)
+
+type WorkflowNodePhase string
+
+const (
+    NodePending   WorkflowNodePhase = "Pending"
+    NodeRunning   WorkflowNodePhase = "Running"
+    NodeSucceeded WorkflowNodePhase = "Succeeded"
+    NodeFailed    WorkflowNodePhase = "Failed"
+    NodeSkipped   WorkflowNodePhase = "Skipped"
+)
+
+type WorkflowStatus struct {
+    Phase              WorkflowPhase        `json:"phase,omitempty"`
+    Message            string               `json:"message,omitempty"`
+    StartTime          *metav1.Time         `json:"startTime,omitempty"`
+    CompletionTime     *metav1.Time         `json:"completionTime,omitempty"`
+    ObservedGeneration int64                `json:"observedGeneration,omitempty"`
+    Conditions         []metav1.Condition   `json:"conditions,omitempty"`
+    Nodes              []WorkflowNodeStatus `json:"nodes,omitempty"`
 }
 
-type DAGTask struct {
-    Name         string   `json:"name"`
-    Template     string   `json:"template"`
-    Dependencies []string `json:"dependencies,omitempty"` // 前置依赖
+// +listType=map
+// +listMapKey=name
+type WorkflowNodeStatus struct {
+    Name           string        `json:"name"`
+    Phase          WorkflowNodePhase `json:"phase,omitempty"`
+    TaskName       string        `json:"taskName,omitempty"`
+    StartTime      *metav1.Time  `json:"startTime,omitempty"`
+    CompletionTime *metav1.Time  `json:"completionTime,omitempty"`
+    Message        string        `json:"message,omitempty"`
 }
 ```
+
+> 校验约定：CEL 负责类型必须为 OneTime、`template` / `taskSpec` 互斥、禁止 `suspend` / `schedule` / `delay`；模板引用、依赖引用与环检测由 Workflow Controller 运行时校验。
 
 ---
 

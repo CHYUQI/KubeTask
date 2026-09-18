@@ -3,6 +3,7 @@
 # It should be run by config/default
 resources:
 - bases/kubetask.kubetask.io_tasks.yaml
+- bases/kubetask.kubetask.io_workflows.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

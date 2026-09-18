@@ -1,0 +1,33 @@
+apiVersion: kubetask.kubetask.io/v1
+kind: Workflow
+metadata:
+  labels:
+    app.kubernetes.io/name: kubetask
+    app.kubernetes.io/managed-by: kustomize
+  name: workflow-sample
+spec:
+  maxParallel: 2
+  tasks:
+    - name: build
+      template: go-build
+    - name: test
+      dependsOn: [build]
+      template: go-test
+    - name: notify-failure
+      dependsOn: [test]
+      runOnFailure: true
+      template: notify
+  taskTemplates:
+    go-build:
+      type: OneTime
+      image: golang:1.25
+      command: ["go", "build", "./..."]
+      backoffLimit: 3
+    go-test:
+      type: OneTime
+      image: golang:1.25
+      command: ["go", "test", "./..."]
+    notify:
+      type: OneTime
+      image: curlimages/curl
+      command: ["sh", "-c", "echo workflow failed"]
