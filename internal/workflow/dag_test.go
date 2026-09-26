@@ -265,3 +265,79 @@ func flattenLevels(levels [][]string) []string {
 	}
 	return out
 }
+
+func TestBuildRejectsEmptyTaskName(t *testing.T) {
+	spec := kubetaskv1.WorkflowSpec{
+		Tasks: []kubetaskv1.WorkflowTask{
+			{TaskSpec: inlineSpec()},
+		},
+	}
+
+	_, err := Build(spec)
+	requireReason(t, err, ReasonInvalidTask)
+}
+
+func TestBuildRejectsTaskWithoutExecutor(t *testing.T) {
+	// template 和 taskSpec 都没设置，无法知道这个节点要执行什么。
+	spec := kubetaskv1.WorkflowSpec{
+		Tasks: []kubetaskv1.WorkflowTask{
+			{Name: "build"},
+		},
+	}
+
+	_, err := Build(spec)
+	requireReason(t, err, ReasonInvalidTask)
+}
+
+func TestBuildRejectsTaskWithBothExecutors(t *testing.T) {
+	// template 和 taskSpec 同时设置，存在二义性。
+	spec := kubetaskv1.WorkflowSpec{
+		Tasks: []kubetaskv1.WorkflowTask{
+			{Name: "build", Template: "go-build", TaskSpec: inlineSpec()},
+		},
+		TaskTemplates: map[string]kubetaskv1.TaskSpec{
+			"go-build": {Type: kubetaskv1.TaskTypeOneTime, Image: "golang:1.25"},
+		},
+	}
+
+	_, err := Build(spec)
+	requireReason(t, err, ReasonInvalidTask)
+}
+
+func TestBuildRejectsUnknownTemplate(t *testing.T) {
+	spec := kubetaskv1.WorkflowSpec{
+		Tasks: []kubetaskv1.WorkflowTask{
+			{Name: "build", Template: "missing"},
+		},
+		TaskTemplates: map[string]kubetaskv1.TaskSpec{
+			"go-build": {Type: kubetaskv1.TaskTypeOneTime, Image: "golang:1.25"},
+		},
+	}
+
+	_, err := Build(spec)
+	requireReason(t, err, ReasonMissingTemplate)
+}
+
+func TestBuildAcceptsTemplateReference(t *testing.T) {
+	// 同一个 Workflow 里允许模板引用和内联 taskSpec 混用。
+	spec := kubetaskv1.WorkflowSpec{
+		Tasks: []kubetaskv1.WorkflowTask{
+			{Name: "build", Template: "go-build"},
+			{Name: "test", DependsOn: []string{"build"}, TaskSpec: inlineSpec()},
+		},
+		TaskTemplates: map[string]kubetaskv1.TaskSpec{
+			"go-build": {Type: kubetaskv1.TaskTypeOneTime, Image: "golang:1.25"},
+		},
+	}
+
+	graph, err := Build(spec)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if graph.Len() != 2 {
+		t.Fatalf("Len() = %d, want 2", graph.Len())
+	}
+	if got := graph.Order(); !reflect.DeepEqual(got, []string{"build", "test"}) {
+		t.Fatalf("Order() = %v, want [build test]", got)
+	}
+}

@@ -59,8 +59,8 @@ func invalidf(reason, format string, args ...any) *ValidationError {
 
 // Build 校验 spec 并构造成可供调度的 Graph。
 //
-// 当前进度：校验任务列表非空、收集任务定义并拒绝重名、校验依赖并填充邻接表、
-// 用 Kahn 算法计算拓扑序并检测环、计算并行层；任务字段校验在后续小步中补齐。
+// 校验顺序：任务列表非空 -> 任务名非空且唯一 -> template/taskSpec 二选一 ->
+// 模板引用存在 -> 依赖引用合法 -> 无环；最后计算拓扑序与并行层。
 func Build(spec kubetaskv1.WorkflowSpec) (*Graph, error) {
 	if len(spec.Tasks) == 0 {
 		return nil, invalidf(ReasonNoTasks, "workflow spec has no tasks")
@@ -73,9 +73,26 @@ func Build(spec kubetaskv1.WorkflowSpec) (*Graph, error) {
 
 	for i := range spec.Tasks {
 		task := spec.Tasks[i]
+		if task.Name == "" {
+			return nil, invalidf(ReasonInvalidTask, "task at index %d has an empty name", i)
+		}
 		if _, exists := g.tasks[task.Name]; exists {
 			return nil, invalidf(ReasonDuplicateTaskName, "task name %q is declared more than once", task.Name)
 		}
+
+		// template 与 taskSpec 必须且只能设置一个。CRD 的 CEL 规则已经拦了一层，
+		// 这里再防一层，保证 Build 被测试或其它调用方直接调用时同样安全。
+		hasTemplate := task.Template != ""
+		hasInlineSpec := task.TaskSpec != nil
+		if hasTemplate == hasInlineSpec {
+			return nil, invalidf(ReasonInvalidTask, "task %q must set exactly one of template or taskSpec", task.Name)
+		}
+		if hasTemplate {
+			if _, ok := spec.TaskTemplates[task.Template]; !ok {
+				return nil, invalidf(ReasonMissingTemplate, "task %q references unknown template %q", task.Name, task.Template)
+			}
+		}
+
 		g.tasks[task.Name] = task
 	}
 
