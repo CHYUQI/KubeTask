@@ -4,7 +4,7 @@
 
 智能云原生任务调度平台 —— 基于 Kubernetes Operator 模式的轻量级分布式任务调度系统。
 
-KubeTask 用自定义资源（CRD）描述任务，由 Controller 自动将其转换为 Kubernetes Job 执行，并将 Vue 3 Web 管理界面与进程内运行的 Gin REST API 打包为同一进程、同一端口交付。相比原生 CronJob，它提供统一的任务视图、任务状态机、执行历史、实时日志、统计趋势和可视化运维界面。
+KubeTask 用自定义资源（CRD）描述任务与工作流：`Task` 由 Controller 自动转换为 Kubernetes Job 执行，`Workflow` 用扁平 DAG 编排多个 Task 的依赖关系。Vue 3 Web 管理界面与进程内运行的 Gin REST API 打包为同一进程、同一端口交付。相比原生 CronJob，它提供统一的任务视图、任务状态机、执行历史、实时日志、统计趋势和可视化运维界面。
 
 > 定位：轻量、可扩展、易部署，适用于中小团队、边缘计算（k3s）与云原生学习实践。
 
@@ -22,6 +22,16 @@ KubeTask 用自定义资源（CRD）描述任务，由 Controller 自动将其�
   - 超时控制（`activeDeadlineSeconds`）与 Job 自动清理（`ttlSecondsAfterFinished`）
   - 并发策略：`Allow` / `Forbid` / `Replace`
   - 手动触发（trigger）、暂停（suspend）、恢复（resume）
+- **Workflow CRD（DAG 工作流编排，Cluster 级，短名 `wf`）**：用扁平 DAG 描述多任务依赖
+  - `spec.tasks[]` 直接声明节点与 `dependsOn`，没有 entrypoint / templates 间接层
+  - 节点执行规格二选一：`template` 引用 `spec.taskTemplates` 命名模板，或内联 `taskSpec`（复用 `TaskSpec`，CEL 强制互斥）
+  - `maxParallel` 限制同时运行的节点数；`runOnFailure` 声明失败分支节点
+  - 状态模型：Workflow `Pending → Running → Succeeded / Failed`，节点 `Pending / Running / Succeeded / Failed / Skipped`
+  - 一个 Workflow CR 即一次运行，子 Task 命名 `<workflow>-<node>`，可确定性幂等创建
+- **DAG 校验与拓扑库（`internal/workflow`）**：纯逻辑包，不依赖 Kubernetes 客户端，Controller 只做编排不做图算法
+  - Kahn 算法拓扑排序 + 依赖环检测 + 并行分层（`Levels()`）
+  - 9 类稳定校验错误码（任务为空、重名、自依赖、未知依赖、重复依赖、模板缺失等），供 Controller 写入 `status.message` 与 Event
+  - 19 个单元测试覆盖校验规则、拓扑序与分层结果
 - **REST API**：任务 CRUD、手动触发、暂停/恢复、统计、趋势、SSE 实时日志
 - **Web UI（与后端同镜像）**：Vue 3 + Vite + ECharts，提供仪表盘、任务列表、详情、创建/编辑、实时日志页面；前端产物由 Dockerfile 自动构建，无需单独部署
 - **SSE 流式日志**：通过 Kubernetes API 实时读取 Job Pod 日志，支持 `tail`、`sinceSeconds`、`follow`
@@ -42,8 +52,10 @@ flowchart LR
     end
 
     subgraph 控制面
-        CRD[Task CRD<br/>kubetask.kubetask.io/v1]
+        CRD[Task / Workflow CRD<br/>kubetask.kubetask.io/v1]
         CTRL[Task Reconciler<br/>controller-runtime]
+        WCTRL[Workflow Reconciler<br/>开发中]
+        DAGPKG[internal/workflow<br/>校验 / 拓扑序 / 并行分层]
     end
 
     subgraph 执行层
@@ -58,9 +70,12 @@ flowchart LR
     CTRL --> JOB
     JOB --> POD
     POD -- 状态同步 --> CTRL
+    CRD --> WCTRL
+    WCTRL --> DAGPKG
+    WCTRL -- 创建子 Task --> CRD
 ```
 
-Controller 与 HTTP Server 在同一进程中运行：`cmd/main.go` 启动 controller-runtime Manager，并在 goroutine 中启动 Gin 服务。
+Controller 与 HTTP Server 在同一进程中运行：`cmd/main.go` 启动 controller-runtime Manager，并在 goroutine 中启动 Gin 服务。Workflow 的编排逻辑由 `internal/workflow` 提供，Reconciler 正在开发中，当前版本可先以声明式 YAML 定义 Workflow 资源。
 
 ## 快速开始
 
@@ -166,6 +181,8 @@ Vite 开发服务器运行在 `http://localhost:5173`，会自动将 `/api` 代�
 
 完整的请求参数、响应结构、错误码和 SSE 日志说明见 [API 文档](docs/API.md)。
 
+> Workflow 的 HTTP API（`/api/v1/workflows`）尚未实现，当前版本请通过 `kubectl` 或 YAML 声明 Workflow，`kubectl get wf` 可查看列表。
+
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `GET` | `/healthz` | 健康检查 |
@@ -261,6 +278,55 @@ spec:
   command: ["sh", "-c", "curl -s https://api.example.com/cache/warmup"]
 ```
 
+## Workflow CRD 示例（DAG 工作流）
+
+一个 Workflow CR 代表一次 DAG 运行：节点在 `dependsOn` 声明的依赖全部成功后执行；`runOnFailure: true` 的节点等待全部依赖到达终态，至少一个为 `Failed / Skipped` 时执行，全部成功则该节点记为 `Skipped`。下面示例中 `build → test` 串行，`notify-failure` 为失败分支。
+
+```yaml
+apiVersion: kubetask.kubetask.io/v1
+kind: Workflow
+metadata:
+  name: workflow-sample
+spec:
+  maxParallel: 2                # 同时运行的节点上限，0 表示不限制
+  tasks:
+    - name: build
+      template: go-build
+    - name: test
+      dependsOn: [build]
+      template: go-test
+    - name: notify-failure
+      dependsOn: [test]
+      runOnFailure: true        # 仅当依赖失败时执行
+      template: notify
+  taskTemplates:                # 命名模板，可被多个节点复用
+    go-build:
+      type: OneTime             # Workflow 节点只允许 OneTime
+      image: golang:1.25
+      command: ["go", "build", "./..."]
+      backoffLimit: 3
+    go-test:
+      type: OneTime
+      image: golang:1.25
+      command: ["go", "test", "./..."]
+    notify:
+      type: OneTime
+      image: curlimages/curl
+      command: ["sh", "-c", "echo workflow failed"]
+```
+
+也可以省略模板，直接在节点上内联执行规格：
+
+```yaml
+    - name: inline-node
+      taskSpec:
+        type: OneTime
+        image: busybox
+        command: ["echo", "inline task"]
+```
+
+其他约束：`template` 与 `taskSpec` 必须且只能设置一个；节点名需匹配 `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`；节点数上限 50；DAG 不允许存在依赖环（由 `internal/workflow` 在运行时校验）。
+
 ## 配置
 
 配置优先级：命令行 Flag > YAML 配置文件 > 环境变量（`KUBETASK_` 前缀）。
@@ -301,16 +367,19 @@ web-dir: /web/dist      # Web UI 静态资源目录（容器内默认）
 ```
 kubetask/
 ├── cmd/main.go                     # 程序入口（Controller + Gin HTTP 同进程）
-├── api/v1/                         # Task CRD 类型定义
+├── api/v1/                         # Task / Workflow CRD 类型定义
 │   ├── task_types.go
+│   ├── workflow_types.go           # Workflow 扁平 DAG + CEL 校验规则
 │   ├── groupversion_info.go
 │   └── zz_generated.deepcopy.go    # 自动生成，勿编辑
 ├── internal/
 │   ├── config/                     # Viper 配置（Flag → YAML → EnvVar）
 │   ├── logger/                     # Zap 结构化日志
-│   ├── controller/                 # Task Reconciler + envtest 测试
-│   ├── api/                        # Gin 路由 + Handler（CRUD / 日志 / 统计）
+│   ├── controller/                 # Task Reconciler + envtest 测试（Workflow Reconciler 开发中）
+│   ├── workflow/                   # DAG 校验 / 拓扑排序 / 并行分层（纯逻辑包 + 单元测试）
+│   ├── api/                        # Gin 路由 + Handler（CRUD / 日志 / 统计）+ Web UI 静态托管
 │   └── testutil/                   # Windows 下 envtest 进程清理
+├── docs/API.md                     # HTTP API 文档
 ├── web/                            # Vue 3 + Vite + ECharts 前端
 ├── charts/kubetask/                # Helm Chart
 ├── deploy/k3s/                     # k3s 一键部署脚本
@@ -367,8 +436,13 @@ go test ./... -count=1
 
 | 版本 | 内容 | 状态 |
 |------|------|------|
-| **v0.1.0** | MVP：Task CRD + Controller + REST API + Web UI（同端口打包）+ Helm/k3s 部署 | ✅ 当前版本 |
-| **v0.2.0** | DAG 工作流编排（Workflow CRD）、多租户认证、Webhook/钉钉/企微告警、调度增强 | 📋 规划中 |
+| **v0.1.0** | MVP：Task CRD + Controller + REST API + Web UI（同端口打包）+ Helm/k3s 部署 | ✅ 已完成 |
+| **v0.2.0** | DAG 工作流编排（Workflow CRD） | 🚧 进行中 |
+| ↳ | Workflow CRD 类型、CEL 校验、CRD / RBAC / 样例生成 | ✅ 已完成 |
+| ↳ | `internal/workflow` DAG 校验与拓扑库（19 个单元测试） | ✅ 已完成 |
+| ↳ | Workflow Reconciler：子 Task 创建、状态回写、失败传播、`maxParallel` 限流 | 🚧 开发中 |
+| ↳ | Workflow HTTP API 与前端 DAG 视图 | 📋 待开发 |
+| ↳ | 多租户认证、Webhook/钉钉/企微告警、调度增强 | 📋 规划中 |
 | **v0.3.0** | 多集群管理（k3s + ACK 云边协同）、智能错峰调度、Prometheus + Grafana 可观测性 | 📋 规划中 |
 
 详细设计见 [PROJECT_PLAN.md](PROJECT_PLAN.md)。

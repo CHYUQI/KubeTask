@@ -20,6 +20,7 @@ rules:
   - kubetask.kubetask.io
   resources:
   - tasks
+  - workflows
   verbs:
   - create
   - delete
@@ -32,12 +33,14 @@ rules:
   - kubetask.kubetask.io
   resources:
   - tasks/finalizers
+  - workflows/finalizers
   verbs:
   - update
 - apiGroups:
   - kubetask.kubetask.io
   resources:
   - tasks/status
+  - workflows/status
   verbs:
   - get
   - patch

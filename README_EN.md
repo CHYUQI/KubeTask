@@ -4,7 +4,7 @@
 
 Smart cloud-native task scheduling platform — a lightweight distributed task scheduling system built on the Kubernetes Operator pattern.
 
-KubeTask describes tasks with a custom resource (CRD), and a controller automatically turns them into Kubernetes Jobs. A Vue 3 web console and the in-process Gin REST API ship in the same process and are served on the same port. Compared with native CronJob, it provides a unified task view, task state machine, execution history, real-time logs, statistics/trends, and a visual operations UI.
+KubeTask describes tasks and workflows with custom resources (CRDs): a `Task` is turned into a Kubernetes Job by the controller, while a `Workflow` orchestrates multiple Tasks as a flat DAG. A Vue 3 web console and the in-process Gin REST API ship in the same process and are served on the same port. Compared with native CronJob, it provides a unified task view, task state machine, execution history, real-time logs, statistics/trends, and a visual operations UI.
 
 > Positioning: lightweight, extensible, and easy to deploy — suitable for small/medium teams, edge computing (k3s), and cloud-native learning.
 
@@ -22,6 +22,16 @@ KubeTask describes tasks with a custom resource (CRD), and a controller automati
   - Timeout control (`activeDeadlineSeconds`) and automatic Job cleanup (`ttlSecondsAfterFinished`)
   - Concurrency policies: `Allow` / `Forbid` / `Replace`
   - Manual trigger, suspend, and resume
+- **Workflow CRD (DAG orchestration, cluster-scoped, short name `wf`)**: flat DAGs for multi-task dependencies
+  - `spec.tasks[]` declares nodes and their `dependsOn` edges directly, with no entrypoint / templates indirection
+  - Each node provides exactly one execution spec: a `template` referencing `spec.taskTemplates`, or an inline `taskSpec` (reusing `TaskSpec`, enforced by CEL)
+  - `maxParallel` caps concurrently running nodes; `runOnFailure` marks failure-branch nodes
+  - Phases: Workflow `Pending → Running → Succeeded / Failed`, node `Pending / Running / Succeeded / Failed / Skipped`
+  - One Workflow CR represents one run; child Tasks are named `<workflow>-<node>` for deterministic, idempotent creation
+- **DAG validation and topology library (`internal/workflow`)**: pure logic package with no Kubernetes client dependency, so the controller only orchestrates
+  - Kahn topological sort, dependency cycle detection, and parallel level computation (`Levels()`)
+  - Nine stable validation reasons (no tasks, duplicate name, self dependency, unknown dependency, duplicate dependency, missing template, and more) for `status.message` and Events
+  - 19 unit tests covering validation rules, topological order, and level computation
 - **REST API**: task CRUD, trigger, suspend/resume, stats, trends, and SSE streaming logs
 - **Web UI (bundled with the image)**: Vue 3 + Vite + ECharts with dashboard, task list, detail, create/edit, and live log pages; the Dockerfile builds the frontend automatically, so no separate deployment is needed
 - **SSE streaming logs**: reads Job Pod logs in real time through the Kubernetes API with `tail`, `sinceSeconds`, and `follow` support
@@ -42,8 +52,10 @@ flowchart LR
     end
 
     subgraph Control Plane
-        CRD[Task CRD<br/>kubetask.kubetask.io/v1]
+        CRD[Task / Workflow CRD<br/>kubetask.kubetask.io/v1]
         CTRL[Task Reconciler<br/>controller-runtime]
+        WCTRL[Workflow Reconciler<br/>in progress]
+        DAGPKG[internal/workflow<br/>validation / order / levels]
     end
 
     subgraph Execution Layer
@@ -58,9 +70,12 @@ flowchart LR
     CTRL --> JOB
     JOB --> POD
     POD -- status sync --> CTRL
+    CRD --> WCTRL
+    WCTRL --> DAGPKG
+    WCTRL -- creates child Tasks --> CRD
 ```
 
-The controller and HTTP server run in the same process: `cmd/main.go` starts the controller-runtime Manager and launches the Gin server in a goroutine.
+The controller and HTTP server run in the same process: `cmd/main.go` starts the controller-runtime Manager and launches the Gin server in a goroutine. Workflow orchestration logic lives in `internal/workflow`; the reconciler is still under development, so Workflows are currently defined declaratively in YAML.
 
 ## Quick Start
 
@@ -164,6 +179,10 @@ npm run dev
 The Vite dev server runs at `http://localhost:5173` and proxies `/api` to `http://localhost:8080`.
 ## REST API
 
+Full request parameters, response shapes, error codes, and SSE log details live in the [API reference](docs/API.md).
+
+> The Workflow HTTP API (`/api/v1/workflows`) is not implemented yet. Define Workflows through `kubectl` or YAML for now; `kubectl get wf` lists them.
+
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/healthz` | Health check |
@@ -259,6 +278,55 @@ spec:
   command: ["sh", "-c", "curl -s https://api.example.com/cache/warmup"]
 ```
 
+## Workflow CRD Example (DAG)
+
+One Workflow CR is one DAG run: a node runs after every `dependsOn` dependency succeeds, while a `runOnFailure: true` node waits for all dependencies to reach a terminal phase and runs when at least one of them is `Failed / Skipped` (if all succeed, the node is marked `Skipped`). In the sample below `build → test` runs in sequence and `notify-failure` is the failure branch.
+
+```yaml
+apiVersion: kubetask.kubetask.io/v1
+kind: Workflow
+metadata:
+  name: workflow-sample
+spec:
+  maxParallel: 2                # concurrent node limit, 0 means unlimited
+  tasks:
+    - name: build
+      template: go-build
+    - name: test
+      dependsOn: [build]
+      template: go-test
+    - name: notify-failure
+      dependsOn: [test]
+      runOnFailure: true        # runs only when dependencies fail
+      template: notify
+  taskTemplates:                # named templates, reusable by multiple nodes
+    go-build:
+      type: OneTime             # Workflow nodes must be OneTime
+      image: golang:1.25
+      command: ["go", "build", "./..."]
+      backoffLimit: 3
+    go-test:
+      type: OneTime
+      image: golang:1.25
+      command: ["go", "test", "./..."]
+    notify:
+      type: OneTime
+      image: curlimages/curl
+      command: ["sh", "-c", "echo workflow failed"]
+```
+
+Nodes can also inline their execution spec instead of referencing a template:
+
+```yaml
+    - name: inline-node
+      taskSpec:
+        type: OneTime
+        image: busybox
+        command: ["echo", "inline task"]
+```
+
+Other constraints: a node must set exactly one of `template` or `taskSpec`; node names must match `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`; at most 50 nodes; dependency cycles are rejected by `internal/workflow` at runtime.
+
 ## Configuration
 
 Priority: command-line flags > YAML config file > environment variables (`KUBETASK_` prefix).
@@ -299,16 +367,19 @@ web-dir: /web/dist      # Web UI static directory (default inside the image)
 ```
 kubetask/
 ├── cmd/main.go                     # Entry point (Controller + Gin HTTP in one process)
-├── api/v1/                         # Task CRD types
+├── api/v1/                         # Task / Workflow CRD types
 │   ├── task_types.go
+│   ├── workflow_types.go           # Flat DAG spec and CEL validation rules
 │   ├── groupversion_info.go
 │   └── zz_generated.deepcopy.go    # auto-generated, do not edit
 ├── internal/
 │   ├── config/                     # Viper config (Flag → YAML → EnvVar)
 │   ├── logger/                     # Zap structured logging
-│   ├── controller/                 # Task Reconciler + envtest suites
-│   ├── api/                        # Gin router + handlers (CRUD / logs / stats)
+│   ├── controller/                 # Task Reconciler + envtest suites (Workflow Reconciler in progress)
+│   ├── workflow/                   # DAG validation / topological order / levels (pure logic + unit tests)
+│   ├── api/                        # Gin router + handlers (CRUD / logs / stats) and Web UI static serving
 │   └── testutil/                   # envtest process cleanup on Windows
+├── docs/API.md                     # HTTP API reference
 ├── web/                            # Vue 3 + Vite + ECharts frontend
 ├── charts/kubetask/                # Helm chart
 ├── deploy/k3s/                     # k3s one-click install script
@@ -365,8 +436,13 @@ go test ./... -count=1
 
 | Version | Content | Status |
 |---------|---------|--------|
-| **v0.1.0** | MVP: Task CRD + Controller + REST API + Web UI (same-port bundle) + Helm/k3s deployment | ✅ Current |
-| **v0.2.0** | DAG workflows (Workflow CRD), multi-tenancy auth, Webhook/DingTalk/WeCom alerts, scheduling enhancements | 📋 Planned |
+| **v0.1.0** | MVP: Task CRD + Controller + REST API + Web UI (same-port bundle) + Helm/k3s deployment | ✅ Done |
+| **v0.2.0** | DAG workflows (Workflow CRD) | 🚧 In progress |
+| ↳ | Workflow CRD types, CEL validation, CRD / RBAC / sample generation | ✅ Done |
+| ↳ | `internal/workflow` DAG validation and topology library (19 unit tests) | ✅ Done |
+| ↳ | Workflow Reconciler: child Task creation, status write-back, failure propagation, `maxParallel` throttling | 🚧 In progress |
+| ↳ | Workflow HTTP API and frontend DAG view | 📋 Planned |
+| ↳ | Multi-tenancy auth, Webhook/DingTalk/WeCom alerts, scheduling enhancements | 📋 Planned |
 | **v0.3.0** | Multi-cluster management (k3s + ACK cloud-edge), smart off-peak scheduling, Prometheus + Grafana observability | 📋 Planned |
 
 See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the detailed design.
