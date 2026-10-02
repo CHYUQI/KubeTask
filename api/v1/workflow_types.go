@@ -59,6 +59,10 @@ type WorkflowSpec struct {
 	Tasks []WorkflowTask `json:"tasks"`
 
 	// TaskTemplates 定义可复用的 TaskSpec 命名模板，由节点通过 template 引用。
+	//
+	// 注意：模板是 map 的值，CEL 规则无法约束其内部字段（与内联 taskSpec 不同）。
+	// Controller 在生成子 Task 时会强制 OneTime 并清空 schedule / delay / suspend，
+	// 因此模板里的调度字段会被忽略而不是报错。
 	// +optional
 	TaskTemplates map[string]TaskSpec `json:"taskTemplates,omitempty"`
 }
