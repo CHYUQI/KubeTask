@@ -54,7 +54,7 @@ flowchart LR
     subgraph Control Plane
         CRD[Task / Workflow CRD<br/>kubetask.kubetask.io/v1]
         CTRL[Task Reconciler<br/>controller-runtime]
-        WCTRL[Workflow Reconciler<br/>in progress]
+        WCTRL[Workflow Reconciler<br/>controller-runtime]
         DAGPKG[internal/workflow<br/>validation / order / levels]
     end
 
@@ -75,7 +75,7 @@ flowchart LR
     WCTRL -- creates child Tasks --> CRD
 ```
 
-The controller and HTTP server run in the same process: `cmd/main.go` starts the controller-runtime Manager and launches the Gin server in a goroutine. Workflow orchestration logic lives in `internal/workflow`; the reconciler is still under development, so Workflows are currently defined declaratively in YAML.
+The controller and HTTP server run in the same process: `cmd/main.go` starts the controller-runtime Manager and launches the Gin server in a goroutine. Workflows are scheduled by `WorkflowReconciler`: it validates the DAG with `internal/workflow`, creates child Tasks according to dependencies and `maxParallel`, mirrors child Task state back into `status.nodes`, and handles failure branches through `runOnFailure` nodes.
 
 ## Quick Start
 
@@ -375,7 +375,7 @@ kubetask/
 ├── internal/
 │   ├── config/                     # Viper config (Flag → YAML → EnvVar)
 │   ├── logger/                     # Zap structured logging
-│   ├── controller/                 # Task Reconciler + envtest suites (Workflow Reconciler in progress)
+│   ├── controller/                 # Task / Workflow Reconciler + envtest suites
 │   ├── workflow/                   # DAG validation / topological order / levels (pure logic + unit tests)
 │   ├── api/                        # Gin router + handlers (CRUD / logs / stats) and Web UI static serving
 │   └── testutil/                   # envtest process cleanup on Windows
@@ -440,7 +440,7 @@ go test ./... -count=1
 | **v0.2.0** | DAG workflows (Workflow CRD) | 🚧 In progress |
 | ↳ | Workflow CRD types, CEL validation, CRD / RBAC / sample generation | ✅ Done |
 | ↳ | `internal/workflow` DAG validation and topology library (19 unit tests) | ✅ Done |
-| ↳ | Workflow Reconciler: child Task creation, status write-back, failure propagation, `maxParallel` throttling | 🚧 In progress |
+| ↳ | Workflow Reconciler: child Task orchestration, status write-back, failure propagation, `maxParallel` throttling, deletion cleanup (32 envtest specs + 7 unit tests) | ✅ Done |
 | ↳ | Workflow HTTP API and frontend DAG view | 📋 Planned |
 | ↳ | Multi-tenancy auth, Webhook/DingTalk/WeCom alerts, scheduling enhancements | 📋 Planned |
 | **v0.3.0** | Multi-cluster management (k3s + ACK cloud-edge), smart off-peak scheduling, Prometheus + Grafana observability | 📋 Planned |

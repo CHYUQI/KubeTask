@@ -157,7 +157,7 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 > 2026-09-09 节点 4：README / README_EN 恢复 Web UI 与同端口交付说明，补充 `web-dir`、部署验证与开发模式；P2.0 全部验收完成。
 
 #### P2.1 DAG 工作流编排（2 周）
-- [ ] **Workflow CRD（扁平 DAG 模式，2026-09-10 定稿）**
+- [x] **Workflow CRD（扁平 DAG 模式，2026-09-10 定稿）**
   ```yaml
   apiVersion: kubetask.kubetask.io/v1
   kind: Workflow
@@ -200,10 +200,18 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
   - `taskTemplates` 为 map 按名引用；同一模板可被多个节点复用，每次触发创建独立 Task 实例
   - 失败分支：默认节点需依赖全部 `Succeeded` 才执行；任一依赖非成功终态则下游 `Skipped`；`runOnFailure: true` 的节点按专门规则判定（见下）
   - 一个 Workflow CR 即一次运行，子 Task 命名 `<workflow>-<node>`，可确定性幂等创建
-- [ ] **Workflow Controller**：DAG 拓扑排序 → 按依赖关系依次/并行创建 Task
-- [ ] **状态机**：`Pending → Running → (Succeeded | Failed | Skipped)`
-- [ ] **失败分支**：`runOnFailure: true` 的节点等待全部依赖到达终态（`Succeeded/Failed/Skipped`）；至少一个依赖为 `Failed/Skipped` 时执行，全部成功时该节点记 `Skipped`（2026-09-15 定稿）；复杂条件表达式顺延 v0.3.0
+- [x] **Workflow Controller**：DAG 拓扑排序 → 按依赖关系依次/并行创建子 Task，子 Task 命名 `<workflow>-<node>`，finalizer 负责删除清理
+- [x] **状态机**：Workflow `Pending → Running → Succeeded/Failed`，节点 `Pending/Running/Succeeded/Failed/Skipped`，`status.nodes` 按拓扑序回写
+- [x] **失败分支**：`runOnFailure: true` 的节点等待全部依赖到达终态（`Succeeded/Failed/Skipped`）；至少一个依赖为 `Failed/Skipped` 时执行，全部成功时该节点记 `Skipped`（2026-09-15 定稿）；复杂条件表达式顺延 v0.3.0
 - [ ] **前端工作流视图**：DAG 图形化展示（使用 Vue Flow 或 Dagre 布局）
+
+> 2026-09-29 节点 5：Workflow Controller MVP 落地 —— `status.nodes` 初始化与回写、按依赖调度子 Task、`maxParallel` 限流、失败传播与 `runOnFailure` 分支、子 Task 名长度校验（>46 字符提前失败）、删除时清理子 Task 并摘 finalizer；envtest 新增 13 个用例，`go build` / `go vet` / 全量 `go test` 通过。Workflow HTTP API 与前端 DAG 视图仍待开发。
+
+> 2026-09-30 节点 6：Workflow CRD 与 Controller 复查，修复两处潜在问题 ——
+> ① 活性：Controller 若在"创建子 Task"与"写 status"之间重启，复用到的已完成子 Task 不会再产生事件，工作流会永久停在 Running；现在复用时立即回写终态并同轮推进下游。
+> ② 正确性：`maxParallel` 的 Running 计数取自同步子 Task 之前的快照，节点本轮落终态时名额没有立即释放，空出的槽位要等下一轮才用得上；现在终态即刻释放。
+> 测试补齐：workflow 相关 envtest 用例累计 32 个（含 CRD 声明式校验 11 个、竞态/冲突/删除等待等边界 8 个）+ 7 个纯逻辑单元测试；`go build` / `go vet` / `controller-gen` / 全量 `go test` 通过。
+> 已知取舍：`taskTemplates` 是 map 值，CEL 无法约束其内部字段（模板里的 type/schedule/delay/suspend 会被 Controller 强制清掉）；运行中删除节点会留下已创建的子 Task；子 Task 被手工 suspend 时节点会一直等待（无超时）。
 
 **设计变更（2026-09-10）**
 

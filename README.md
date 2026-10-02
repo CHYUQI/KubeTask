@@ -54,7 +54,7 @@ flowchart LR
     subgraph 控制面
         CRD[Task / Workflow CRD<br/>kubetask.kubetask.io/v1]
         CTRL[Task Reconciler<br/>controller-runtime]
-        WCTRL[Workflow Reconciler<br/>开发中]
+        WCTRL[Workflow Reconciler<br/>controller-runtime]
         DAGPKG[internal/workflow<br/>校验 / 拓扑序 / 并行分层]
     end
 
@@ -75,7 +75,7 @@ flowchart LR
     WCTRL -- 创建子 Task --> CRD
 ```
 
-Controller 与 HTTP Server 在同一进程中运行：`cmd/main.go` 启动 controller-runtime Manager，并在 goroutine 中启动 Gin 服务。Workflow 的编排逻辑由 `internal/workflow` 提供，Reconciler 正在开发中，当前版本可先以声明式 YAML 定义 Workflow 资源。
+Controller 与 HTTP Server 在同一进程中运行：`cmd/main.go` 启动 controller-runtime Manager，并在 goroutine 中启动 Gin 服务。Workflow 的调度由 `WorkflowReconciler` 完成：先用 `internal/workflow` 校验 DAG，再按依赖与 `maxParallel` 创建子 Task，并把子 Task 状态回写到 `status.nodes`，失败分支由 `runOnFailure` 节点承接。
 
 ## 快速开始
 
@@ -375,7 +375,7 @@ kubetask/
 ├── internal/
 │   ├── config/                     # Viper 配置（Flag → YAML → EnvVar）
 │   ├── logger/                     # Zap 结构化日志
-│   ├── controller/                 # Task Reconciler + envtest 测试（Workflow Reconciler 开发中）
+│   ├── controller/                 # Task / Workflow Reconciler + envtest 测试
 │   ├── workflow/                   # DAG 校验 / 拓扑排序 / 并行分层（纯逻辑包 + 单元测试）
 │   ├── api/                        # Gin 路由 + Handler（CRUD / 日志 / 统计）+ Web UI 静态托管
 │   └── testutil/                   # Windows 下 envtest 进程清理
@@ -440,7 +440,7 @@ go test ./... -count=1
 | **v0.2.0** | DAG 工作流编排（Workflow CRD） | 🚧 进行中 |
 | ↳ | Workflow CRD 类型、CEL 校验、CRD / RBAC / 样例生成 | ✅ 已完成 |
 | ↳ | `internal/workflow` DAG 校验与拓扑库（19 个单元测试） | ✅ 已完成 |
-| ↳ | Workflow Reconciler：子 Task 创建、状态回写、失败传播、`maxParallel` 限流 | 🚧 开发中 |
+| ↳ | Workflow Reconciler：子 Task 编排、状态回写、失败传播、`maxParallel` 限流、删除清理（32 个 envtest 用例 + 7 个单元测试） | ✅ 已完成 |
 | ↳ | Workflow HTTP API 与前端 DAG 视图 | 📋 待开发 |
 | ↳ | 多租户认证、Webhook/钉钉/企微告警、调度增强 | 📋 规划中 |
 | **v0.3.0** | 多集群管理（k3s + ACK 云边协同）、智能错峰调度、Prometheus + Grafana 可观测性 | 📋 规划中 |
