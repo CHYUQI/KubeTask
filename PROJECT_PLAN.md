@@ -203,6 +203,7 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 - [x] **Workflow Controller**：DAG 拓扑排序 → 按依赖关系依次/并行创建子 Task，子 Task 命名 `<workflow>-<node>`，finalizer 负责删除清理
 - [x] **状态机**：Workflow `Pending → Running → Succeeded/Failed`，节点 `Pending/Running/Succeeded/Failed/Skipped`，`status.nodes` 按拓扑序回写
 - [x] **失败分支**：`runOnFailure: true` 的节点等待全部依赖到达终态（`Succeeded/Failed/Skipped`）；至少一个依赖为 `Failed/Skipped` 时执行，全部成功时该节点记 `Skipped`（2026-09-15 定稿）；复杂条件表达式顺延 v0.3.0
+- [x] **Workflow HTTP API**：`POST/GET/DELETE /api/v1/workflows`，详情返回 DAG 图数据（nodes / edges / order / levels），入口复用 `internal/workflow` 做运行时校验并返回稳定 Reason
 - [ ] **前端工作流视图**：DAG 图形化展示（使用 Vue Flow 或 Dagre 布局）
 
 > 2026-09-29 节点 5：Workflow Controller MVP 落地 —— `status.nodes` 初始化与回写、按依赖调度子 Task、`maxParallel` 限流、失败传播与 `runOnFailure` 分支、子 Task 名长度校验（>46 字符提前失败）、删除时清理子 Task 并摘 finalizer；envtest 新增 13 个用例，`go build` / `go vet` / 全量 `go test` 通过。Workflow HTTP API 与前端 DAG 视图仍待开发。
@@ -212,6 +213,9 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 > ② 正确性：`maxParallel` 的 Running 计数取自同步子 Task 之前的快照，节点本轮落终态时名额没有立即释放，空出的槽位要等下一轮才用得上；现在终态即刻释放。
 > 测试补齐：workflow 相关 envtest 用例累计 32 个（含 CRD 声明式校验 11 个、竞态/冲突/删除等待等边界 8 个）+ 7 个纯逻辑单元测试；`go build` / `go vet` / `controller-gen` / 全量 `go test` 通过。
 > 已知取舍：`taskTemplates` 是 map 值，CEL 无法约束其内部字段（模板里的 type/schedule/delay/suspend 会被 Controller 强制清掉）；运行中删除节点会留下已创建的子 Task；子 Task 被手工 suspend 时节点会一直等待（无超时）。
+
+> 2026-10-02 节点 7：Workflow HTTP API 落地 —— 创建（可选 generateName）、列表（分页 + phase 筛选）、详情（原始对象 + DAG 图数据，非法 spec 也能降级渲染并带 `validationError`）、删除（异步，返回后由 Controller 清理子 Task）。子 Task 命名与长度校验从 Controller 提取到 `internal/workflow`（`ChildTaskName` / `ValidateChildTaskNames` / `MaxChildTaskNameLength`），HTTP 入口与 Controller 共用同一份规则，非法请求直接 400 + 稳定 Reason。测试：API 侧新增 12 个 envtest 用例（共 28 个），DAG 包新增 2 个单测。
+> 待办（Task ↔ Workflow 一致性）：子 Task 会出现在 Task 列表 / 统计 / 趋势中；Task 侧的 PUT/trigger/suspend/resume 未拦截 Workflow 托管的 Task；独立 Task 缺少名字长度校验；Task 的 `Suspended` 没有对应的节点状态。
 
 **设计变更（2026-09-10）**
 

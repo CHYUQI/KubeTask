@@ -181,7 +181,7 @@ Vite 开发服务器运行在 `http://localhost:5173`，会自动将 `/api` 代�
 
 完整的请求参数、响应结构、错误码和 SSE 日志说明见 [API 文档](docs/API.md)。
 
-> Workflow 的 HTTP API（`/api/v1/workflows`）尚未实现，当前版本请通过 `kubectl` 或 YAML 声明 Workflow，`kubectl get wf` 可查看列表。
+> Workflow 已提供 HTTP API（创建 / 列表 / 详情 / 删除），详情接口会返回前端 DAG 视图需要的节点、边、拓扑序与并行层。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -197,6 +197,10 @@ Vite 开发服务器运行在 `http://localhost:5173`，会自动将 `/api` 代�
 | `GET` | `/api/v1/tasks/:name/logs?tail=100&follow=true&sinceSeconds=60` | SSE 流式日志 |
 | `GET` | `/api/v1/stats` | 任务统计（状态分布 + 类型分布） |
 | `GET` | `/api/v1/stats/trend` | 按天执行趋势 |
+| `POST` | `/api/v1/workflows` | 创建工作流（DAG 编排） |
+| `GET` | `/api/v1/workflows?page=1&pageSize=20&phase=Running` | 工作流列表（分页 + 状态筛选） |
+| `GET` | `/api/v1/workflows/:name` | 工作流详情（含 DAG 图数据） |
+| `DELETE` | `/api/v1/workflows/:name` | 删除工作流（异步清理子 Task） |
 
 示例：
 

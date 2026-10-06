@@ -181,7 +181,7 @@ The Vite dev server runs at `http://localhost:5173` and proxies `/api` to `http:
 
 Full request parameters, response shapes, error codes, and SSE log details live in the [API reference](docs/API.md).
 
-> The Workflow HTTP API (`/api/v1/workflows`) is not implemented yet. Define Workflows through `kubectl` or YAML for now; `kubectl get wf` lists them.
+> The Workflow HTTP API is available (create / list / get / delete). The detail endpoint returns the nodes, edges, topological order, and parallel levels the frontend DAG view needs.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -197,6 +197,10 @@ Full request parameters, response shapes, error codes, and SSE log details live 
 | `GET` | `/api/v1/tasks/:name/logs?tail=100&follow=true&sinceSeconds=60` | SSE streaming logs |
 | `GET` | `/api/v1/stats` | Task stats (status + type distribution) |
 | `GET` | `/api/v1/stats/trend` | Daily execution trend |
+| `POST` | `/api/v1/workflows` | Create a workflow (DAG orchestration) |
+| `GET` | `/api/v1/workflows?page=1&pageSize=20&phase=Running` | List workflows (pagination + phase filter) |
+| `GET` | `/api/v1/workflows/:name` | Get a workflow with DAG graph data |
+| `DELETE` | `/api/v1/workflows/:name` | Delete a workflow (child Tasks cleaned up asynchronously) |
 
 Examples:
 

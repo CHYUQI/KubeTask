@@ -1,7 +1,7 @@
 # KubeTask API 文档
 
 本文档描述 KubeTask 当前实现的 HTTP API。接口以 `internal/api/router.go` 和
-`internal/api/handler/` 中的代码为准，规划中的 Workflow API 不包含在本文档内。
+`internal/api/handler/` 中的代码为准。Workflow（DAG 工作流）接口见第 9 节。
 
 ## 1. 基本信息
 
@@ -36,6 +36,10 @@
 | `GET` | `/api/v1/tasks/:name/logs` | 获取 Job Pod 日志，SSE |
 | `GET` | `/api/v1/stats` | 查询任务统计 |
 | `GET` | `/api/v1/stats/trend` | 查询执行趋势 |
+| `POST` | `/api/v1/workflows` | 创建工作流 |
+| `GET` | `/api/v1/workflows` | 查询工作流列表 |
+| `GET` | `/api/v1/workflows/:name` | 查询工作流详情（含 DAG 图数据） |
+| `DELETE` | `/api/v1/workflows/:name` | 删除工作流（异步清理子 Task） |
 
 ### 健康与就绪探针
 
@@ -548,3 +552,108 @@ curl http://localhost:8080/api/v1/stats/trend
 }
 ```
 
+## 9. Workflow 接口
+
+Workflow 是 Cluster-scoped 的 DAG 编排资源：一个 Workflow CR 代表一次运行，
+Controller 按 `dependsOn` 依次创建子 Task（命名为 `<workflow>-<node>`）。
+数据模型见 [PROJECT_PLAN.md](../PROJECT_PLAN.md) 的 P2.1 节。
+
+### 9.1 创建工作流
+
+```http
+POST /api/v1/workflows
+Content-Type: application/json
+```
+
+请求体是一个完整的 Workflow 对象（`metadata.name` 可省略，省略时按 `workflow-` 前缀自动生成）：
+
+```json
+{
+  "apiVersion": "kubetask.kubetask.io/v1",
+  "kind": "Workflow",
+  "metadata": { "name": "ci-pipeline" },
+  "spec": {
+    "maxParallel": 2,
+    "tasks": [
+      { "name": "build", "template": "go-build" },
+      { "name": "test", "dependsOn": ["build"], "template": "go-test" },
+      { "name": "notify-failure", "dependsOn": ["test"], "runOnFailure": true, "template": "notify" }
+    ],
+    "taskTemplates": {
+      "go-build": { "type": "OneTime", "image": "golang:1.25", "command": ["go", "build", "./..."] },
+      "go-test": { "type": "OneTime", "image": "golang:1.25", "command": ["go", "test", "./..."] },
+      "notify": { "type": "OneTime", "image": "curlimages/curl", "command": ["sh", "-c", "echo workflow failed"] }
+    }
+  }
+}
+```
+
+成功返回 `201 Created` 和创建后的 Workflow 对象。错误响应：
+
+| 状态码 | 场景 | 响应示例 |
+| --- | --- | --- |
+| `400` | 模板/依赖引用不存在、依赖成环、子 Task 名超长、CRD 结构或 CEL 校验失败 | `{"error":"task \"build\" references unknown template \"nope\"","reason":"MissingTemplate"}` |
+| `409` | 同名 Workflow 已存在 | `{"error":"workflow already exists"}` |
+
+> `reason` 取自 `internal/workflow` 的稳定错误码（如 `MissingTemplate`、`UnknownDependency`、
+> `CyclicDependency`、`InvalidTask`），CEL 规则覆盖的字段（`taskSpec.type`、`schedule`、
+> `delay`、`suspend`、`template`/`taskSpec` 互斥）由 API Server 直接拒绝。
+
+### 9.2 查询工作流列表
+
+```http
+GET /api/v1/workflows?page=1&pageSize=20&phase=Running
+```
+
+支持的查询参数：`page`（默认 1）、`pageSize`（默认 20）、`phase`
+（`Pending` / `Running` / `Succeeded` / `Failed`）。
+
+```json
+{
+  "items": [ { "metadata": { "name": "ci-pipeline" }, "spec": { }, "status": { "phase": "Running" } } ],
+  "total": 1,
+  "page": 1,
+  "pageSize": 20
+}
+```
+
+### 9.3 查询工作流详情（含 DAG 图数据）
+
+```http
+GET /api/v1/workflows/ci-pipeline
+```
+
+```json
+{
+  "workflow": { "metadata": { "name": "ci-pipeline" }, "status": { "phase": "Running" } },
+  "graph": {
+    "nodes": [
+      { "name": "build", "dependsOn": [], "phase": "Succeeded", "taskName": "ci-pipeline-build" },
+      { "name": "test", "dependsOn": ["build"], "phase": "Running", "taskName": "ci-pipeline-test" },
+      { "name": "notify-failure", "dependsOn": ["test"], "runOnFailure": true, "phase": "Pending" }
+    ],
+    "edges": [
+      { "from": "build", "to": "test" },
+      { "from": "test", "to": "notify-failure" }
+    ],
+    "order": ["build", "test", "notify-failure"],
+    "levels": [["build"], ["test"], ["notify-failure"]]
+  }
+}
+```
+
+- `nodes` / `edges` 来自 spec，并合并 `status.nodes` 的运行时状态（无状态时 `phase` 默认 `Pending`）。
+- `order` 是拓扑序，`levels` 是并行层，供前端（Vue Flow / Dagre）布局使用。
+- 若 spec 被 `kubectl` 改成非法（例如引用了不存在的模板），接口仍返回 `200`，
+  但 `graph.validationError` 会带上原因，前端可以据此提示用户。
+- 工作流不存在时返回 `404`：`{"error":"workflow not found"}`。
+
+### 9.4 删除工作流
+
+```http
+DELETE /api/v1/workflows/ci-pipeline
+```
+
+返回 `200 OK`：`{"message":"workflow deleting","workflow":"ci-pipeline"}`。
+删除是异步的：Workflow 带 finalizer，Controller 会先删除全部子 Task，
+清理完成后对象才真正消失；期间 `GET` 仍能查到（`metadata.deletionTimestamp` 非空）。
