@@ -46,13 +46,6 @@ const (
 
 	// workflowCleanupRequeue 是等待子 Task 完全删除的重试间隔。
 	workflowCleanupRequeue = 2 * time.Second
-
-	// maxChildTaskNameLength 限制子 Task 名称长度。
-	//
-	// 推导：Task 控制器用 "<task 名>-<10 位 Unix 秒>" 创建 Job，Job 控制器再给 Pod 追加
-	// "-<5 位随机后缀>"，而 Pod 名必须是不超过 63 字符的 DNS-1123 label。
-	// 固定开销 1+10+1+5 = 17，因此子 Task 名最多 46 字符。
-	maxChildTaskNameLength = 46
 )
 
 // errTaskNameConflict 表示 <workflow>-<node> 这个名字已被其它 Workflow 的子 Task 占用。
@@ -130,7 +123,7 @@ func (r *WorkflowReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// 子 Task 名会被复用为 Job / Pod 名，超长时提前失败，避免创建出必然失败的 Job。
-	if err := validateChildTaskNames(wf, graph); err != nil {
+	if err := workflow.ValidateChildTaskNames(wf.Name, graph); err != nil {
 		return r.markWorkflowFailed(ctx, wf, workflowFailureMessage(err))
 	}
 
@@ -231,26 +224,6 @@ func workflowFailureMessage(err error) string {
 		return fmt.Sprintf("%s: %s", validationErr.Reason, validationErr.Message)
 	}
 	return err.Error()
-}
-
-// validateChildTaskNames 提前拦截会派生非法 Job / Pod 名的节点。
-func validateChildTaskNames(wf *kubetaskv1.Workflow, graph *workflow.Graph) error {
-	offending := make([]string, 0)
-	for _, name := range graph.Order() {
-		childName := childTaskName(wf.Name, name)
-		if len(childName) > maxChildTaskNameLength {
-			offending = append(offending, fmt.Sprintf("%s (%d chars)", childName, len(childName)))
-		}
-	}
-	if len(offending) == 0 {
-		return nil
-	}
-
-	return &workflow.ValidationError{
-		Reason: workflow.ReasonInvalidTask,
-		Message: fmt.Sprintf("child task names must not exceed %d characters: %s",
-			maxChildTaskNameLength, strings.Join(offending, ", ")),
-	}
 }
 
 // =============================================================================
@@ -366,7 +339,7 @@ func (r *WorkflowReconciler) advanceNodes(ctx context.Context, wf *kubetaskv1.Wo
 			continue
 		}
 
-		child := children[childTaskName(wf.Name, node.Name)]
+		child := children[workflow.ChildTaskName(wf.Name, node.Name)]
 		if child == nil {
 			// 子 Task 被外部删除：用同一个确定性名字重建，保证状态收敛。
 			if _, err := r.createChildTask(ctx, wf, graph, node.Name); err != nil {
@@ -475,11 +448,6 @@ func summarize(wf *kubetaskv1.Workflow) bool {
 // Child Tasks
 // =============================================================================
 
-// childTaskName 是子 Task 的确定性名字，让重复 reconcile 天然幂等。
-func childTaskName(workflowName, nodeName string) string {
-	return fmt.Sprintf("%s-%s", workflowName, nodeName)
-}
-
 // childTaskSpec 取模板或内联规格的快照，并强制 Workflow 节点按一次性任务执行。
 func childTaskSpec(wf *kubetaskv1.Workflow, graph *workflow.Graph, nodeName string) kubetaskv1.TaskSpec {
 	task, ok := graph.Task(nodeName)
@@ -524,7 +492,7 @@ func (r *WorkflowReconciler) listChildTasks(ctx context.Context, wf *kubetaskv1.
 // 名字是确定性的，所以 AlreadyExists 属于正常路径：只要 owner 是本 Workflow 就直接复用；
 // 若被别的 Workflow 占用则返回 errTaskNameConflict。
 func (r *WorkflowReconciler) createChildTask(ctx context.Context, wf *kubetaskv1.Workflow, graph *workflow.Graph, nodeName string) (*kubetaskv1.Task, error) {
-	name := childTaskName(wf.Name, nodeName)
+	name := workflow.ChildTaskName(wf.Name, nodeName)
 	task := &kubetaskv1.Task{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,

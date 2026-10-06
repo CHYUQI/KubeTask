@@ -442,7 +442,7 @@ var _ = Describe("Workflow Controller", func() {
 
 			stored := getWorkflow(wfName)
 			Expect(stored.Status.Phase).To(Equal(kubetaskv1.WorkflowFailed))
-			Expect(stored.Status.Message).To(ContainSubstring("child task names"))
+			Expect(stored.Status.Message).To(ContainSubstring("子 Task 名"))
 			Expect(listWorkflowChildren(wfName)).To(BeEmpty())
 		})
 	})

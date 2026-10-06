@@ -173,7 +173,7 @@ func TestDecideNode(t *testing.T) {
 
 func TestValidateChildTaskNamesLengthBoundary(t *testing.T) {
 	node := "build"
-	limit := maxChildTaskNameLength - len(node) - 1 // 工作流名可用的最大长度
+	limit := workflow.MaxChildTaskNameLength - len(node) - 1 // 工作流名可用的最大长度
 
 	tests := []struct {
 		name       string
@@ -190,7 +190,7 @@ func TestValidateChildTaskNamesLengthBoundary(t *testing.T) {
 			name:       "one character over the limit is rejected",
 			workflow:   strings.Repeat("a", limit+1),
 			wantErr:    true,
-			wantSubstr: "child task names",
+			wantSubstr: "子 Task 名",
 		},
 	}
 
@@ -200,9 +200,8 @@ func TestValidateChildTaskNamesLengthBoundary(t *testing.T) {
 				Tasks: []kubetaskv1.WorkflowTask{{Name: node, TaskSpec: inlineSpec()}},
 			}
 			graph := mustBuildGraph(t, spec)
-			wf := &kubetaskv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: tt.workflow}, Spec: spec}
 
-			err := validateChildTaskNames(wf, graph)
+			err := workflow.ValidateChildTaskNames(tt.workflow, graph)
 			if tt.wantErr && err == nil {
 				t.Fatal("expected an error, got nil")
 			}
@@ -278,12 +277,6 @@ func TestChildTaskSpecFromInlineTaskSpec(t *testing.T) {
 	got.Args[0] = "mutated"
 	if wf.Spec.Tasks[0].TaskSpec.Args[0] != "-c" {
 		t.Fatal("childTaskSpec 返回的 slice 与 spec 共享底层数组")
-	}
-}
-
-func TestChildTaskName(t *testing.T) {
-	if got := childTaskName("ci-pipeline", "unit-test"); got != "ci-pipeline-unit-test" {
-		t.Fatalf("childTaskName = %q", got)
 	}
 }
 

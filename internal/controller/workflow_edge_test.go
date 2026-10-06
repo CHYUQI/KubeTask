@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
+	"kubetask.io/kubetask/internal/workflow"
 )
 
 // createExistingChildTask 手工造一个"看起来已经存在"的子 Task，
@@ -35,7 +36,7 @@ import (
 func createExistingChildTask(wf *kubetaskv1.Workflow, node string, phase kubetaskv1.TaskPhase) {
 	task := &kubetaskv1.Task{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: childTaskName(wf.Name, node),
+			Name: workflow.ChildTaskName(wf.Name, node),
 			Labels: map[string]string{
 				workflowLabel:     wf.Name,
 				workflowNodeLabel: node,

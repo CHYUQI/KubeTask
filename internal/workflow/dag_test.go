@@ -3,6 +3,7 @@ package workflow
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
@@ -339,5 +340,50 @@ func TestBuildAcceptsTemplateReference(t *testing.T) {
 	}
 	if got := graph.Order(); !reflect.DeepEqual(got, []string{"build", "test"}) {
 		t.Fatalf("Order() = %v, want [build test]", got)
+	}
+}
+
+func TestChildTaskName(t *testing.T) {
+	if got := ChildTaskName("ci-pipeline", "unit-test"); got != "ci-pipeline-unit-test" {
+		t.Fatalf("ChildTaskName() = %q, want ci-pipeline-unit-test", got)
+	}
+}
+
+func TestValidateChildTaskNames(t *testing.T) {
+	graph, err := Build(kubetaskv1.WorkflowSpec{
+		Tasks: []kubetaskv1.WorkflowTask{
+			{Name: "build", TaskSpec: inlineSpec()},
+			{Name: "test", DependsOn: []string{"build"}, TaskSpec: inlineSpec()},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	// 最长 allowed workflow 名：46 - 1 - len("build") = 40
+	tests := []struct {
+		name       string
+		workflow   string
+		wantErr    bool
+		wantReason string
+	}{
+		{name: "short name is fine", workflow: "ci", wantErr: false},
+		{name: "exactly at limit", workflow: strings.Repeat("a", 40), wantErr: false},
+		{name: "one over limit", workflow: strings.Repeat("a", 41), wantErr: true, wantReason: ReasonInvalidTask},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateChildTaskNames(tt.workflow, graph)
+			if tt.wantErr && err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantErr {
+				requireReason(t, err, tt.wantReason)
+			}
+		})
 	}
 }
