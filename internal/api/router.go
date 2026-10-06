@@ -23,6 +23,7 @@ func NewRouter(k8sClient client.Client, clientset kubernetes.Interface, addr str
 	engine.Use(gin.Recovery())
 
 	taskH := handler.NewTaskHandler(k8sClient)
+	workflowH := handler.NewWorkflowHandler(k8sClient)
 	logH := handler.NewLogHandler(k8sClient, clientset)
 
 	engine.GET("/healthz", func(c *gin.Context) {
@@ -42,6 +43,11 @@ func NewRouter(k8sClient client.Client, clientset kubernetes.Interface, addr str
 		v1.GET("/tasks/:name/logs", logH.Stream)
 		v1.GET("/stats", taskH.Stats)
 		v1.GET("/stats/trend", taskH.Trend)
+
+		v1.POST("/workflows", workflowH.Create)
+		v1.GET("/workflows", workflowH.List)
+		v1.GET("/workflows/:name", workflowH.Get)
+		v1.DELETE("/workflows/:name", workflowH.Delete)
 	}
 
 	return &Router{
