@@ -170,6 +170,25 @@ Content-Type: application/json
 - `spec.image` 必须存在；
 - `type=Cron` 时，`spec.schedule` 必须是合法的标准 5 字段 Cron 表达式。
 
+> **名称长度不由 API 校验**（只校验 Kubernetes 名字本身的合法性）。超长名字会在 Controller
+> 侧被判失败，见下面的说明。
+
+#### Task 名称长度限制（Controller 兜底）
+
+Task 名会被 TaskReconciler 拼成 Job 名（`<task 名>-<10 位 Unix 秒>`），Job 控制器再用它拼 Pod 名
+（再追加 5 位随机后缀），而 Pod 名不能超过 63 字符。因此 **Task 名上限是 46 字符**：
+
+- ≤ 46 字符：正常创建 Job 执行。
+- \> 46 字符：`POST /api/v1/tasks` 会返回 `201`（名字本身是合法 Kubernetes 名称），
+  但 Controller 不会创建 Job，而是把 Task 置为 `Failed`，`status.message` 形如：
+
+  ```text
+  task name is too long: 60 characters, limit is 46 (derived Job/Pod name would exceed 63 characters)
+  ```
+
+- Workflow 的子 Task 名（`<workflow>-<node>`）是拼出来的，因此在**创建 Workflow 时**就按同一条
+  上限校验，超限直接返回 `400` + `reason=InvalidTask`（见 9.1 节）。
+
 响应：`201 Created`
 
 ```json

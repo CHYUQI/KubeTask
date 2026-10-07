@@ -192,20 +192,42 @@ mgr.Start(...)                  // Controller 阻塞主 goroutine
 - **OwnerReference**: Job → Task 的归属关系 (SetControllerReference)
 - **Status 子资源**: Controller 用 `Status().Update()`，API Handler 用 `Update()`
 
-### API 端点清单 (10 个)
-| 方法 | 路径 | Handler |
-|------|------|---------|
-| POST | `/api/v1/tasks` | Create |
-| GET | `/api/v1/tasks?page=1&type=Cron` | List (分页+筛选) |
-| GET | `/api/v1/tasks/:name` | Get |
-| PUT | `/api/v1/tasks/:name` | Update |
-| DELETE | `/api/v1/tasks/:name` | Delete |
-| POST | `/api/v1/tasks/:name/trigger` | Trigger |
-| POST | `/api/v1/tasks/:name/suspend` | Suspend |
-| POST | `/api/v1/tasks/:name/resume` | Resume |
-| GET | `/api/v1/tasks/:name/logs?tail=100&follow=true` | Stream (SSE) |
-| GET | `/api/v1/stats` | Stats |
-| GET | `/api/v1/stats/trend` | Trend |
+### API 端点清单
+
+端点、请求/响应结构、错误码和示例统一维护在 **[docs/API.md](docs/API.md)**（Task + Workflow + 统计 + SSE 日志），
+本文档不再内嵌接口清单。
+
+- 事实来源是 `internal/api/router.go`；改路由或响应结构时必须同步更新 `docs/API.md`。
+- 新增端点时同时补 handler 测试（`internal/api/handler/*_test.go`）。
+
+---
+
+## 判断原则：以已有的 CRD 与 Controller 为准
+
+- **唯一事实来源是代码**：判断系统行为时以 `api/v1/*_types.go` 的 CRD 定义和 `internal/controller/` 的实现为准。
+  计划书、README、API 文档与代码冲突时以代码为准，并在报告里指出文档需要更新，不要反过来按文档改代码。
+- **先读实现、再下结论**：任何"冲突 / 不一致 / 潜在 bug"的判断都要落到具体字段和代码路径上，
+  给出触发条件（什么输入、走到哪个分支、产生什么结果）。没有代码或实测证据的一律标注"待验证"，不要写成结论。
+- **不夸大问题**：严格区分"理论上的不一致"与"真实会改变运行行为"。
+  默认假设现有实现是正确且可用的；只处理已确认会真实发生的问题。
+- **不引入多余机制**：不为假想场景新增 CEL / VAP / webhook / CRD 字段 / 新资源类型。
+  确有必要时必须先说明代价与备选方案，等维护者确认后再动。
+- **不迁就前端**：不能因为 UI 展示方便而修改后端的接口语义或领域逻辑。UI 适配后端，不是反过来。
+- **上报格式**：现象 → 代码路径 → 是否真的会触发 → 最小改法 → 备选方案；一轮只推进一个已确认的问题。
+
+### 已确认并接受的差异（不要再当作缺陷重复上报）
+
+- Workflow 的子 Task 出现在 Task 列表 / 统计 / 趋势里是**预期行为**：子 Task 本身就是 Task。
+- **改子 Task 的 spec 不会改变运行行为**：`handleOneTime` 在 Job 已存在时只做 `syncJobStatus`，
+  任务已终态且没有 Job 时直接跳过；spec 变化只停留在对象字段层面。
+- **子 Task 被 suspend 会自愈**：`handleSuspend` 只把 phase 置为 `Suspended` 后早退；
+  resume 后 phase 复位 `Pending`，下一轮 `handleOneTime` 走 `syncJobStatus` 正常推进。
+- **唯一会真实改变行为的是 trigger**（`kubetask.io/last-trigger` 注解，旧 Job 已被清理时会再跑一次）。
+  当前决定不修改：语义上"子 Task 是某次运行的记录，要重跑就重新跑一次 Workflow"。
+- **Task 名长度（Job/Pod 名限制）由 Controller 兜底，API 层不校验**：`TaskReconciler` 对超过
+  `internal/naming.MaxTaskNameLength`（46）的名字直接置 `Failed` 且不创建 Job；
+  Workflow 子 Task 名是拼出来的，仍在创建 Workflow 时于入口校验（`internal/workflow.ValidateChildTaskNames`）。
+- 长度上限只在 `internal/naming` 定义一份（`MaxTaskNameLength`），Task 侧和编排侧都引用它，不要复制第二份。
 
 ---
 
