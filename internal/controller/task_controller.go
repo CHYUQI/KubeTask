@@ -6,6 +6,7 @@ import (
 	"time"
 
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
+	"kubetask.io/kubetask/internal/naming"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -79,6 +80,12 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	// handle 3 kinds of Task type
+	// Task 名会被追加 "-<10 位 Unix 秒>" 用作 Job 名，Job 控制器再追加 5 位随机后缀用作 Pod 名。
+	// 超长名字必然派生出非法的 Pod 名，这里提前判失败，不去创建注定失败的 Job。
+	if len(task.Name) > naming.MaxTaskNameLength {
+		return r.handleNameTooLong(ctx, task)
+	}
+
 	switch task.Spec.Type {
 	case kubetaskv1.TaskTypeOneTime:
 		return r.handleOneTime(ctx, task)
@@ -157,6 +164,32 @@ func (r *TaskReconciler) handleSuspend(ctx context.Context, task *kubetaskv1.Tas
 	}
 
 	log.Info("Task is suspended, skipping", "task", task.Name)
+	return ctrl.Result{}, nil
+}
+
+// handleNameTooLong 把超过命名上限的 Task 直接置为 Failed。
+//
+// Task 名本身是合法的 Kubernetes 名字，所以这类 Task 能创建成功，但派生的 Job/Pod 名会非法；
+// 与其让 Job 创建时反复报错，不如在这里给出确定性的失败原因。
+func (r *TaskReconciler) handleNameTooLong(ctx context.Context, task *kubetaskv1.Task) (ctrl.Result, error) {
+	log := ctrlLog.FromContext(ctx)
+
+	message := fmt.Sprintf(
+		"task name is too long: %d characters, limit is %d (derived Job/Pod name would exceed 63 characters)",
+		len(task.Name), naming.MaxTaskNameLength)
+
+	if task.Status.Phase == kubetaskv1.TaskFailed && task.Status.Message == message {
+		return ctrl.Result{}, nil
+	}
+
+	task.Status.Phase = kubetaskv1.TaskFailed
+	task.Status.Message = message
+	if err := r.Status().Update(ctx, task); err != nil {
+		log.Error(err, "Failed to update Task status", "task", task.Name)
+		return ctrl.Result{}, err
+	}
+
+	log.Info("Task name exceeds the Job/Pod naming limit", "task", task.Name, "limit", naming.MaxTaskNameLength)
 	return ctrl.Result{}, nil
 }
 

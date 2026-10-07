@@ -24,6 +24,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
+	"kubetask.io/kubetask/internal/naming"
 	"kubetask.io/kubetask/internal/workflow"
 )
 
@@ -173,7 +174,7 @@ func TestDecideNode(t *testing.T) {
 
 func TestValidateChildTaskNamesLengthBoundary(t *testing.T) {
 	node := "build"
-	limit := workflow.MaxChildTaskNameLength - len(node) - 1 // 工作流名可用的最大长度
+	limit := naming.MaxTaskNameLength - len(node) - 1 // 工作流名可用的最大长度
 
 	tests := []struct {
 		name       string

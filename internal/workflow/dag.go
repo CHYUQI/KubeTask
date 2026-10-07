@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
+	"kubetask.io/kubetask/internal/naming"
 )
 
 // ValidationError 表示 Workflow spec 无法被调度。
@@ -256,13 +257,6 @@ func (g *Graph) Deps(name string) []string {
 	return append([]string(nil), g.deps[name]...)
 }
 
-// MaxChildTaskNameLength 是子 Task 名称的长度上限。
-//
-// 推导：Task 控制器用 "<task 名>-<10 位 Unix 秒>" 创建 Job，Job 控制器再给 Pod 追加
-// "-<5 位随机后缀>"，而 Pod 名不能超过 63 字符（否则容器运行时拒绝该主机名）。
-// 固定开销 1+10+1+5 = 17，因此子 Task 名最多 46 字符。
-const MaxChildTaskNameLength = 46
-
 // ChildTaskName 返回节点对应的子 Task 名称 <workflow>-<node>。
 //
 // 名字是确定性的：同一个 Workflow 的同一个节点永远对应同一个 Task，
@@ -277,7 +271,7 @@ func ValidateChildTaskNames(workflowName string, g *Graph) error {
 	offending := make([]string, 0)
 	for _, name := range g.Order() {
 		childName := ChildTaskName(workflowName, name)
-		if len(childName) > MaxChildTaskNameLength {
+		if len(childName) > naming.MaxTaskNameLength {
 			offending = append(offending, fmt.Sprintf("%s (%d 字符)", childName, len(childName)))
 		}
 	}
@@ -287,5 +281,5 @@ func ValidateChildTaskNames(workflowName string, g *Graph) error {
 
 	return invalidf(ReasonInvalidTask,
 		"子 Task 名不能超过 %d 字符（Job/Pod 名长度限制）：%s",
-		MaxChildTaskNameLength, strings.Join(offending, ", "))
+		naming.MaxTaskNameLength, strings.Join(offending, ", "))
 }

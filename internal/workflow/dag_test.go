@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
+	"kubetask.io/kubetask/internal/naming"
 )
 
 // requireReason 断言 err 是带指定 Reason 的 ValidationError。
@@ -360,7 +361,9 @@ func TestValidateChildTaskNames(t *testing.T) {
 		t.Fatalf("Build() error = %v", err)
 	}
 
-	// 最长 allowed workflow 名：46 - 1 - len("build") = 40
+	// 最长允许的 workflow 名：46 - 1 - len("build") = 40
+	limit := naming.MaxTaskNameLength - 1 - len("build")
+
 	tests := []struct {
 		name       string
 		workflow   string
@@ -368,8 +371,8 @@ func TestValidateChildTaskNames(t *testing.T) {
 		wantReason string
 	}{
 		{name: "short name is fine", workflow: "ci", wantErr: false},
-		{name: "exactly at limit", workflow: strings.Repeat("a", 40), wantErr: false},
-		{name: "one over limit", workflow: strings.Repeat("a", 41), wantErr: true, wantReason: ReasonInvalidTask},
+		{name: "exactly at limit", workflow: strings.Repeat("a", limit), wantErr: false},
+		{name: "one over limit", workflow: strings.Repeat("a", limit+1), wantErr: true, wantReason: ReasonInvalidTask},
 	}
 
 	for _, tt := range tests {
