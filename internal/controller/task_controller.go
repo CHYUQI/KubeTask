@@ -34,6 +34,8 @@ type TaskReconciler struct {
 // +kubebuilder:rbac:groups=kubetask.kubetask.io,resources=tasks/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=kubetask.kubetask.io,resources=tasks/finalizers,verbs=update
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=pods/log,verbs=get
 
 func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := ctrlLog.FromContext(ctx)
