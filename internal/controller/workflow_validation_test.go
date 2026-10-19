@@ -142,7 +142,6 @@ var _ = Describe("Workflow CRD validation", func() {
 	}
 
 	for _, tc := range invalidSpecs {
-		tc := tc
 		It(tc.desc, func() {
 			wf := newWorkflow("wf-invalid-" + tc.slug)
 			tc.mutate(&wf.Spec)
