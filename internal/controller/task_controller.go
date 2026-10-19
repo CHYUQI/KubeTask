@@ -448,11 +448,9 @@ func (r *TaskReconciler) syncJobStatus(ctx context.Context, task *kubetaskv1.Tas
 
 	for i := range jobs.Items {
 		job := &jobs.Items[i]
-		if job.Status.Active > 0 {
-			activeJobs = append(activeJobs, job.Name)
-		}
-
 		if !r.jobTransitioned(job) {
+			// A Job remains in progress between retry Pods, when Active may be zero.
+			activeJobs = append(activeJobs, job.Name)
 			continue
 		}
 
@@ -463,18 +461,20 @@ func (r *TaskReconciler) syncJobStatus(ctx context.Context, task *kubetaskv1.Tas
 			Phase:     r.jobPhase(job),
 		}
 
-		if idx, ok := historyIndex[job.Name]; ok {
-			if !isTerminalExecutionRecord(task.Status.ExecutionHistory[idx]) {
-				task.Status.Failed += job.Status.Failed
-				task.Status.Succeeded += job.Status.Succeeded
-				task.Status.ExecutionHistory[idx] = record
-				statusDirty = true
+		idx, recorded := historyIndex[job.Name]
+		if !recorded || !isTerminalExecutionRecord(task.Status.ExecutionHistory[idx]) {
+			// Count execution outcomes, not the number of successful/failed Pod attempts.
+			if record.Phase == kubetaskv1.TaskSucceeded {
+				task.Status.Succeeded++
+			} else {
+				task.Status.Failed++
 			}
-		} else {
-			task.Status.Failed += job.Status.Failed
-			task.Status.Succeeded += job.Status.Succeeded
-			task.Status.ExecutionHistory = append(task.Status.ExecutionHistory, record)
-			historyIndex[job.Name] = len(task.Status.ExecutionHistory) - 1
+			if recorded {
+				task.Status.ExecutionHistory[idx] = record
+			} else {
+				task.Status.ExecutionHistory = append(task.Status.ExecutionHistory, record)
+				historyIndex[job.Name] = len(task.Status.ExecutionHistory) - 1
+			}
 			statusDirty = true
 		}
 
@@ -513,17 +513,17 @@ func (r *TaskReconciler) syncJobStatus(ctx context.Context, task *kubetaskv1.Tas
 	return ctrl.Result{}, nil
 }
 
-// jobTransitioned checks if the Job has transitioned to a terminal state (succeeded or failed) or has a condition indicating completion or failure.
+// jobTransitioned checks for a terminal Job condition. Pod counters include
+// retry attempts and cannot determine whether the whole execution has finished.
 func (r *TaskReconciler) jobTransitioned(job *batchv1.Job) bool {
-	return job.Status.Succeeded > 0 || job.Status.Failed > 0 ||
-		jobConditionTrue(job, batchv1.JobComplete) || jobConditionTrue(job, batchv1.JobFailed)
+	return jobConditionTrue(job, batchv1.JobComplete) || jobConditionTrue(job, batchv1.JobFailed)
 }
 
 func (r *TaskReconciler) jobPhase(job *batchv1.Job) kubetaskv1.TaskPhase {
-	if job.Status.Succeeded > 0 || jobConditionTrue(job, batchv1.JobComplete) {
+	if jobConditionTrue(job, batchv1.JobComplete) {
 		return kubetaskv1.TaskSucceeded
 	}
-	if job.Status.Failed > 0 || jobConditionTrue(job, batchv1.JobFailed) {
+	if jobConditionTrue(job, batchv1.JobFailed) {
 		return kubetaskv1.TaskFailed
 	}
 	return kubetaskv1.TaskRunning

@@ -92,8 +92,12 @@ function startStream() {
   lines.value = []
   streaming.value = true
 
-  const url = `/api/v1/tasks/${taskName}/logs?tail=${tail.value}&follow=${follow.value}`
+  const following = follow.value
+  let streamOpened = false
+  const url = `/api/v1/tasks/${taskName}/logs?tail=${tail.value}&follow=${following}`
   eventSource = new EventSource(url)
+
+  eventSource.onopen = () => { streamOpened = true }
 
   eventSource.onmessage = (e) => {
     if (e.data) lines.value.push(e.data)
@@ -101,7 +105,9 @@ function startStream() {
   }
 
   eventSource.onerror = () => {
-    error.value = '日志流连接中断'
+    // EventSource reports EOF as an error, including normal completion of a
+    // non-following response. Keep the received log lines visible in that case.
+    if (!streamOpened || following) error.value = '日志流连接中断'
     stopStream()
   }
 }

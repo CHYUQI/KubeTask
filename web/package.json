@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test": "node --test tests/*.test.js",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@dagrejs/dagre": "3.1.1",
     "echarts": "^6.1.0",
     "vue": "^3.5.39",
     "vue-router": "^4.6.4"

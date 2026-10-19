@@ -529,6 +529,7 @@ var _ = Describe("Task Controller", func() {
 
 			job := &jobs.Items[0]
 			job.Status.Failed = 1
+			markJobFailed(job)
 			Expect(k8sClient.Status().Update(ctx, job)).To(Succeed())
 
 			r := newTestReconciler()

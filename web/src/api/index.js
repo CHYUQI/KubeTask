@@ -32,6 +32,11 @@ async function request(url, options = {}) {
 }
 
 export const api = {
+  listWorkflows(params = {}) {
+    const q = new URLSearchParams(params).toString()
+    return request('/workflows' + (q ? '?' + q : ''))
+  },
+  getWorkflow(name) { return request('/workflows/' + encodeURIComponent(name)) },
   listTasks(params = {}) {
     const q = new URLSearchParams(params).toString()
     return request('/tasks' + (q ? '?' + q : ''))

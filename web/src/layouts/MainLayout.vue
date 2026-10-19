@@ -6,6 +6,7 @@
         <router-link to="/">仪表盘</router-link>
         <router-link to="/tasks">任务列表</router-link>
         <router-link to="/tasks/create">创建任务</router-link>
+        <router-link to="/workflows">工作流列表</router-link>
       </nav>
     </aside>
     <main class="content">

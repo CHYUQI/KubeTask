@@ -194,7 +194,7 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
         image: curlimages/curl
         command: ["sh", "-c", "curl -X POST $WEBHOOK"]
   ```
-- [ ] **扁平模式要点**
+- [x] **扁平模式要点**
   - `spec.tasks[]` 直接声明 DAG 节点（`name` + `dependsOn`），去掉 `entrypoint` / `templates[dag]` 间接层
   - 节点执行参数二选一：`template` 引用 `spec.taskTemplates` 中的命名模板，或内联 `taskSpec`（复用 TaskSpec，CEL 约束 exactly one）
   - `taskTemplates` 为 map 按名引用；同一模板可被多个节点复用，每次触发创建独立 Task 实例
@@ -204,7 +204,7 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 - [x] **状态机**：Workflow `Pending → Running → Succeeded/Failed`，节点 `Pending/Running/Succeeded/Failed/Skipped`，`status.nodes` 按拓扑序回写
 - [x] **失败分支**：`runOnFailure: true` 的节点等待全部依赖到达终态（`Succeeded/Failed/Skipped`）；至少一个依赖为 `Failed/Skipped` 时执行，全部成功时该节点记 `Skipped`（2026-09-15 定稿）；复杂条件表达式顺延 v0.3.0
 - [x] **Workflow HTTP API**：`POST/GET/DELETE /api/v1/workflows`，详情返回 DAG 图数据（nodes / edges / order / levels），入口复用 `internal/workflow` 做运行时校验并返回稳定 Reason
-- [ ] **前端工作流视图**：DAG 图形化展示（使用 Vue Flow 或 Dagre 布局）
+- [x] **前端工作流视图**：工作流列表/详情、Dagre 自动布局、状态着色、失败分支虚线、缩放与节点详情、子 Task/日志跳转、运行状态自动刷新
 
 > 2026-09-29 节点 5：Workflow Controller MVP 落地 —— `status.nodes` 初始化与回写、按依赖调度子 Task、`maxParallel` 限流、失败传播与 `runOnFailure` 分支、子 Task 名长度校验（>46 字符提前失败）、删除时清理子 Task 并摘 finalizer；envtest 新增 13 个用例，`go build` / `go vet` / 全量 `go test` 通过。Workflow HTTP API 与前端 DAG 视图仍待开发。
 
@@ -215,7 +215,11 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 > 已知取舍：`taskTemplates` 是 map 值，CEL 无法约束其内部字段（模板里的 type/schedule/delay/suspend 会被 Controller 强制清掉）；运行中删除节点会留下已创建的子 Task；子 Task 被手工 suspend 时节点会一直等待（无超时）。
 
 > 2026-10-02 节点 7：Workflow HTTP API 落地 —— 创建（可选 generateName）、列表（分页 + phase 筛选）、详情（原始对象 + DAG 图数据，非法 spec 也能降级渲染并带 `validationError`）、删除（异步，返回后由 Controller 清理子 Task）。子 Task 命名与长度校验从 Controller 提取到 `internal/workflow`（`ChildTaskName` / `ValidateChildTaskNames` / `MaxChildTaskNameLength`），HTTP 入口与 Controller 共用同一份规则，非法请求直接 400 + 稳定 Reason。测试：API 侧新增 12 个 envtest 用例（共 28 个），DAG 包新增 2 个单测。
-> 待办（Task ↔ Workflow 一致性）：子 Task 会出现在 Task 列表 / 统计 / 趋势中；Task 侧的 PUT/trigger/suspend/resume 未拦截 Workflow 托管的 Task；独立 Task 缺少名字长度校验；Task 的 `Suspended` 没有对应的节点状态。
+> 2026-10-12 状态同步：上述 Task ↔ Workflow 差异已按 AGENTS.md 定案，不再列为缺陷待办。子 Task 出现在 Task 列表/统计中为预期行为；spec 修改不改变已创建 Job 的执行，suspend/resume 可继续推进；trigger 维持既有语义；Task 名长度由 Controller 使用 `internal/naming.MaxTaskNameLength` 兜底。
+
+> 2026-10-12 节点 8：P2.1 前端完成 —— 工作流列表/详情、Dagre DAG 布局、状态着色、失败分支虚线、缩放/节点选择、子 Task/日志跳转、运行状态自动刷新及非法定义降级展示。6 个前端布局测试、前端构建、Go 完整校验流水线通过；使用 envtest 的真实 API + 两个 Controller 完成浏览器联调，Job 状态由测试注入，未执行真实 Pod / 容器部署验收。详见 [P2.1 验收记录](docs/P2.1_VERIFICATION.md)。
+
+> 2026-10-13 节点 9：补齐 minikube 真集群验收 —— Hyper-V 单节点 2 CPU / 3 GB，K8s v1.35.0；成功和失败工作流各执行 4 个真实 Pod，验证容器退出码、依赖推进、失败分支、maxParallel、8 路 SSE 日志与删除清理。新增 Windows 集成脚本 `test/integration/workflow_minikube.ps1`；修复并复验非跟踪日志正常结束后被前端误判为断线的问题。KubeTask 以本机程序连接集群，Docker / Helm 容器部署仍未验收。
 
 **设计变更（2026-09-10）**
 

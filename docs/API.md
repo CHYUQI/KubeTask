@@ -135,8 +135,8 @@ Controller-runtime Manager 还会在 `health-probe-bind-address` 配置的端口
 | `lastCompletionTime` | timestamp | 最近一次执行完成时间 |
 | `executionHistory` | object[] | 最近最多 10 条执行记录 |
 | `activeJobs` | string[] | 当前运行中的 Job 名称 |
-| `failed` | int32 | 累计失败次数 |
-| `succeeded` | int32 | 累计成功次数 |
+| `failed` | int32 | 累计执行失败次数，按 Job 最终失败计数，不含 Pod 重试失败次数 |
+| `succeeded` | int32 | 累计执行成功次数，按 Job 最终成功计数 |
 | `conditions` | object[] | Kubernetes 风格的状态条件 |
 
 执行记录结构：

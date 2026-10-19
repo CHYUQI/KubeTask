@@ -33,7 +33,7 @@ KubeTask describes tasks and workflows with custom resources (CRDs): a `Task` is
   - Nine stable validation reasons (no tasks, duplicate name, self dependency, unknown dependency, duplicate dependency, missing template, and more) for `status.message` and Events
   - 19 unit tests covering validation rules, topological order, and level computation
 - **REST API**: task CRUD, trigger, suspend/resume, stats, trends, and SSE streaming logs
-- **Web UI (bundled with the image)**: Vue 3 + Vite + ECharts with dashboard, task list, detail, create/edit, and live log pages; the Dockerfile builds the frontend automatically, so no separate deployment is needed
+- **Web UI (bundled with the image)**: Vue 3 + Vite + ECharts with dashboard, task management, live logs, and workflow list/detail pages; Dagre lays out DAGs with status colors, zoom, node inspection, and child Task/log links; the Dockerfile builds the frontend automatically, so no separate deployment is needed
 - **SSE streaming logs**: reads Job Pod logs in real time through the Kubernetes API with `tail`, `sinceSeconds`, and `follow` support
 - **Configuration**: Flags → YAML config file → environment variables (Viper, `KUBETASK_` prefix)
 - **Structured logging**: Zap with console / JSON formats
@@ -182,6 +182,8 @@ The Vite dev server runs at `http://localhost:5173` and proxies `/api` to `http:
 Full request parameters, response shapes, error codes, and SSE log details live in the [API reference](docs/API.md).
 
 > The Workflow HTTP API is available (create / list / get / delete). The detail endpoint returns the nodes, edges, topological order, and parallel levels the frontend DAG view needs.
+
+Open the workflow list in the sidebar, filter by phase, and select a name to view its DAG. The graph supports zoom, fit-to-window, and node inspection; dashed edges indicate failure branches. Child Task and log links are available for scheduled nodes. Active workflow details refresh every five seconds by default and stop polling at a terminal phase; automatic refresh can be disabled and manual refresh remains available. Create and delete workflows through the API or `kubectl`.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -445,7 +447,7 @@ go test ./... -count=1
 | ↳ | Workflow CRD types, CEL validation, CRD / RBAC / sample generation | ✅ Done |
 | ↳ | `internal/workflow` DAG validation and topology library (19 unit tests) | ✅ Done |
 | ↳ | Workflow Reconciler: child Task orchestration, status write-back, failure propagation, `maxParallel` throttling, deletion cleanup (32 envtest specs + 7 unit tests) | ✅ Done |
-| ↳ | Workflow HTTP API and frontend DAG view | 📋 Planned |
+| ↳ | Workflow HTTP API and frontend DAG view (list/detail, Dagre layout, state refresh, child Task/log links) | ✅ Done |
 | ↳ | Multi-tenancy auth, Webhook/DingTalk/WeCom alerts, scheduling enhancements | 📋 Planned |
 | **v0.3.0** | Multi-cluster management (k3s + ACK cloud-edge), smart off-peak scheduling, Prometheus + Grafana observability | 📋 Planned |
 

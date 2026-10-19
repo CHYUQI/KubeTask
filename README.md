@@ -33,7 +33,7 @@ KubeTask 用自定义资源（CRD）描述任务与工作流：`Task` 由 Contro
   - 9 类稳定校验错误码（任务为空、重名、自依赖、未知依赖、重复依赖、模板缺失等），供 Controller 写入 `status.message` 与 Event
   - 19 个单元测试覆盖校验规则、拓扑序与分层结果
 - **REST API**：任务 CRUD、手动触发、暂停/恢复、统计、趋势、SSE 实时日志
-- **Web UI（与后端同镜像）**：Vue 3 + Vite + ECharts，提供仪表盘、任务列表、详情、创建/编辑、实时日志页面；前端产物由 Dockerfile 自动构建，无需单独部署
+- **Web UI（与后端同镜像）**：Vue 3 + Vite + ECharts，提供仪表盘、任务管理、实时日志及工作流列表/详情；Dagre 自动布局 DAG，支持状态着色、缩放、节点详情和子 Task/日志跳转；前端产物由 Dockerfile 自动构建，无需单独部署
 - **SSE 流式日志**：通过 Kubernetes API 实时读取 Job Pod 日志，支持 `tail`、`sinceSeconds`、`follow`
 - **配置管理**：Flag → YAML 配置文件 → 环境变量（Viper，`KUBETASK_` 前缀）
 - **结构化日志**：Zap，支持 console / JSON 格式
@@ -182,6 +182,8 @@ Vite 开发服务器运行在 `http://localhost:5173`，会自动将 `/api` 代�
 完整的请求参数、响应结构、错误码和 SSE 日志说明见 [API 文档](docs/API.md)。
 
 > Workflow 已提供 HTTP API（创建 / 列表 / 详情 / 删除），详情接口会返回前端 DAG 视图需要的节点、边、拓扑序与并行层。
+
+从侧栏「工作流列表」按状态筛选，点击名称进入详情。依赖图支持缩放、适应窗口和节点选择；失败分支使用虚线连接，节点可跳转到子 Task 和日志。运行中的详情默认每 5 秒刷新，终态停止自动请求，也可关闭自动刷新或手动刷新。工作流仍通过 API 或 `kubectl` 创建和删除。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -445,7 +447,7 @@ go test ./... -count=1
 | ↳ | Workflow CRD 类型、CEL 校验、CRD / RBAC / 样例生成 | ✅ 已完成 |
 | ↳ | `internal/workflow` DAG 校验与拓扑库（19 个单元测试） | ✅ 已完成 |
 | ↳ | Workflow Reconciler：子 Task 编排、状态回写、失败传播、`maxParallel` 限流、删除清理（32 个 envtest 用例 + 7 个单元测试） | ✅ 已完成 |
-| ↳ | Workflow HTTP API 与前端 DAG 视图 | 📋 待开发 |
+| ↳ | Workflow HTTP API 与前端 DAG 视图（列表/详情、Dagre 布局、状态刷新、子 Task/日志跳转） | ✅ 已完成 |
 | ↳ | 多租户认证、Webhook/钉钉/企微告警、调度增强 | 📋 规划中 |
 | **v0.3.0** | 多集群管理（k3s + ACK 云边协同）、智能错峰调度、Prometheus + Grafana 可观测性 | 📋 规划中 |
 
