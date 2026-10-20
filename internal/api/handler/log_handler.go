@@ -107,6 +107,7 @@ func (h *LogHandler) Stream(c *gin.Context) {
 			if err != nil {
 				return false
 			}
+			c.Writer.Flush()
 		}
 		if !follow {
 			return false

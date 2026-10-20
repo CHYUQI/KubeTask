@@ -8,7 +8,7 @@
 - 默认 API 地址：`http://localhost:8080`
 - API 前缀：`/api/v1`
 - 数据格式：JSON
-- 当前版本未实现认证与授权，部署时应通过 Ingress、Service 或网关限制访问范围。
+- HTTP 认证默认关闭，可通过 `auth-enabled` 开启 ServiceAccount Bearer 认证；资源授权与租户隔离尚未实现。
 - Task 是 Kubernetes Cluster-scoped 资源，不需要在 URL 中携带 namespace。
 - Controller 创建的 Job 当前固定在 `default` namespace 中。
 
@@ -19,6 +19,82 @@
   "error": "task not found"
 }
 ```
+
+### 1.1 认证配置与路由接入
+
+默认 `auth-enabled: false`，业务 API 允许匿名访问。开启认证时必须指定非空
+`auth-audience`，例如：
+
+```yaml
+auth-enabled: true
+auth-audience: kubetask
+```
+
+认证项支持以下配置来源，优先级为**显式命令行参数 > 环境变量 > YAML > 默认值**：
+
+| 配置项 | 命令行参数 | 环境变量 | 默认值 |
+| --- | --- | --- | --- |
+| `auth-enabled` | `--auth-enabled=true` / `--auth-enabled=false` | `KUBETASK_AUTH_ENABLED` | `false` |
+| `auth-audience` | `--auth-audience=kubetask` | `KUBETASK_AUTH_AUDIENCE` | 空字符串 |
+
+只注册而未显式传入的 flag 默认值不会覆盖环境变量或 YAML；显式的
+`--auth-enabled=false` 可以覆盖其他来源的开启设置。audience 会去除首尾空白。
+开启时 audience 为空、开关值无法解析、或无法加载 Kubernetes 配置，启动会失败。
+
+启动入口使用已有 Kubernetes 客户端的 `AuthenticationV1().TokenReviews()`
+构造校验器，按开关将认证中间件传入路由。构造时不调用 TokenReview；运行时
+无法完成 TokenReview（包括权限不足）返回下述通用 503，不会转为匿名处理。
+
+`NewRouter` 可接收可选的 Gin 中间件，并在注册端点前按传入顺序统一挂到
+`/api/v1` 路由组。调用方可显式传入已有的认证中间件：
+
+```go
+router := api.NewRouter(k8sClient, clientset, addr,
+    middleware.Authentication(authenticator),
+)
+```
+
+挂载认证后，所有已注册的 Task、Workflow、统计、趋势和 SSE 日志端点均要求
+`Authorization: Bearer <token>`，不接受 URL 参数传 Token。缺失或格式错误的
+请求头、未通过校验的凭据返回 `401 {"error":"Unauthorized"}`，并携带
+`WWW-Authenticate: Bearer`；认证服务不可用、非预期校验错误、认证超时或取消
+返回 `503 {"error":"Service Unavailable"}`。认证响应不暴露 Token 或底层错误。
+
+`/healthz` 与网页静态资源不经过该认证中间件；未注册的 API 路径仍返回 404。
+认证最多使用 3 秒的子 context，调用结束立即释放，后续业务请求及 SSE
+继续使用原请求 context。认证只确认身份，不限制资源访问范围；ServiceAccount
+所属 namespace 不代表 Task 或 Workflow 的隔离边界。
+
+当前只实现身份认证，尚未接入 SubjectAccessReview 授权、API Key 或操作审计。
+前端尚未发送 Token；开启后其业务 API 请求也会收到 401，网页静态资源仍可访问。
+下文无 Token 的调用示例对应默认关闭认证的状态；开启后需要为 API 请求附加
+`Authorization` 请求头，例如：
+
+```bash
+curl http://localhost:8080/api/v1/tasks \
+  -H "Authorization: Bearer ${KUBETASK_TOKEN}"
+```
+
+`KUBETASK_TOKEN` 在这里仅为客户端调用示例使用的环境变量，不是服务端配置项。
+
+真实 Token 的自动化联调位于 `internal/api/auth_envtest_test.go`：强制使用本地
+envtest，创建临时 ServiceAccount 并通过 TokenRequest 签发 Token，再调用真实
+TokenReview 和业务路由。覆盖匹配 audience 的 200、错误 audience/无效 Token/
+缺少凭据的 401，以及审查客户端缺少 TokenReview 权限时的 503。
+单独运行需要设置 `KUBEBUILDER_ASSETS`。测试还验证了当前业务 RBAC 边界：
+SubjectAccessReview 和直接 Kubernetes 请求均拒绝调用者列出 Task，但认证后的
+业务 HTTP 请求仍返回 200，因为业务 API 尚未接入调用者授权。
+
+Token 自然过期是可选慢测：设置 `KUBETASK_TEST_TOKEN_EXPIRY=true`，并使用
+`go test ./internal/api -run '^TestServiceAccountTokenAuthentication$' -count=1 -timeout=15m`。
+测试申请 600 秒的真实 Token，先验证 200，再按服务器返回的过期时间等待其自然
+变为 401，允许额外两分钟的校验容差；不修改 Token 或系统时间。常规流水线跳过
+这项慢测，不能把普通套件通过描述为自然过期验证通过。
+
+`internal/api/log_stream_test.go` 使用真实 HTTP 连接与可控的上游日志服务，验证
+首条事件立即送达、超过认证的三秒期限后仍可接收事件、认证每个请求只执行一次，
+以及客户端取消会关闭上游日志请求。该测试不启动真实 Pod，也未验证流内 Token
+自然过期后的行为。这些测试不代表实际部署已开启认证或已实现租户隔离。
 
 ## 2. 接口总览
 
@@ -557,7 +633,7 @@ curl http://localhost:8080/api/v1/stats/trend
 
 ## 8. Standalone 模式
 
-当程序未连接到 Kubernetes 集群时，会进入 Standalone 模式。此时 API 端口仍
+当 `auth-enabled: false` 且程序无法加载 Kubernetes 配置时，会进入 Standalone 模式。此时 API 端口仍
 会启动，`GET /healthz` 返回正常，但除健康检查外的未注册路由会返回：
 
 ```http
@@ -570,6 +646,9 @@ curl http://localhost:8080/api/v1/stats/trend
   "message": "请先连接 Kubernetes 集群。确保 ~/.kube/config 存在且集群可达。"
 }
 ```
+
+若 `auth-enabled: true` 且无法加载 Kubernetes 配置，程序直接退出，不进入
+Standalone 模式。
 
 ## 9. Workflow 接口
 
