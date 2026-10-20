@@ -1,5 +1,55 @@
-# Vue 3 + Vite
+# KubeTask Web UI
 
-This template should help get you started developing with Vue 3 in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+最后核对：2026-10-20。Vue 3 + Vite + Vue Router + ECharts + Dagre；生产静态资源由 Gin 与 REST API 在 8080 同端口提供。当前检查结果见 [项目状态](../docs/PROJECT_STATUS.md)。
 
-Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://vuejs.org/guide/scaling-up/tooling.html#ide-support).
+## 开发与构建
+
+使用 Node.js 22.12+ 和 npm（本次检查：Node 24.17.0 / npm 11.13.0；Dockerfile 使用 Node 22）。在本目录执行：
+
+```powershell
+npm ci
+npm run dev
+```
+
+开发地址为 `http://localhost:5173`，`vite.config.js` 将 `/api` 代理到 `http://localhost:8080`。需另行从项目根目录启动连接 Kubernetes 的后端，并先安装 `config/crd/bases/` 中的 CRD。
+
+```powershell
+# 在 web/ 中执行
+npm test
+npm run build
+npm run preview
+```
+
+`preview` 只预览静态产物，当前配置未为它设置 API 代理；完整联调使用 Vite 开发服务，或回到项目根目录通过后端托管：
+
+```powershell
+$env:KUBETASK_WEB_DIR = 'web/dist'
+go run ./cmd/main.go
+```
+
+Dockerfile 自动执行 `npm ci` / `npm run build` 并把 `dist/` 复制到镜像 `/web/dist`，生产无需单独运行 Vite。
+
+## 页面与边界
+
+- `/#/`：任务统计、状态分布、执行趋势。
+- `/#/tasks`、`/#/tasks/create`、`/#/tasks/:name`：任务列表、创建、详情与触发/暂停/恢复/删除；当前没有独立编辑页，更新 spec 使用 API。
+- `/#/tasks/:name/logs`：SSE 日志、跟踪、过滤、自动滚动、行号与级别高亮。
+- `/#/workflows`、`/#/workflows/create`、`/#/workflows/:name`：工作流列表、详情、DAG、节点状态、缩放、子 Task/日志跳转和自动刷新；创建页复用现有 API，删除继续使用 API 或 kubectl。
+
+Workflow 子 Task 出现在任务列表和统计中是预期行为。API 与领域语义以 [API 文档](../docs/API.md) 和后端代码为准。
+
+## 认证与请求
+
+`src/api/index.js` 为普通业务请求入口，`auth.js` 管理页面内存中的 Token 与请求取消，`http.js` 处理通用错误，`logs.js` 使用 fetch 流式读取 SSE，以支持 Authorization 请求头。
+
+页面上方可设置、更换或清除原始 ServiceAccount Token。Token 不写入 URL、localStorage 或 sessionStorage，刷新后需重新输入；未设置时匿名访问，兼容后端默认关闭认证的状态。更换/清除会取消旧请求并重新加载当前视图，不自动重试写操作。
+
+401 展开 Token 输入提示；403 提示权限不足，503 提示服务不可用，保留凭据。前端支持 403 不代表后端已实现 RBAC 资源授权。普通请求超时 10 秒，SSE 只限制建立连接的时间，正常 EOF 保留日志，离开页面/停止会取消流。
+
+## 验证
+
+`npm test` 使用 Node 原生测试，覆盖认证与请求取消、SSE 解码和 DAG 布局；本次 16 个测试通过。构建与后端回归的最终结果统一记录在 [项目状态](../docs/PROJECT_STATUS.md)。
+
+历史浏览器与集群验收见 [P2.1](../docs/P2.1_VERIFICATION.md) 和 [P2.2 前端认证](../docs/P2.2_FRONTEND_AUTH_VERIFICATION.md)。Node 单测与静态构建不代替浏览器或真实集群验收。
+
+界面组件来源与 UX 调整见 [Liquid Glass 集成说明](LIQUID_GLASS.md)。

@@ -8,19 +8,21 @@ KubeTask describes tasks and workflows with custom resources (CRDs): a `Task` is
 
 > Positioning: lightweight, extensible, and easy to deploy — suitable for small/medium teams, edge computing (k3s), and cloud-native learning.
 
+Status (2026-10-20): P2.0 same-port packaging and P2.1 Workflow orchestration/UI are implemented. P2.2 includes ServiceAccount authentication and frontend Token support; resource authorization, tenant isolation, API keys, and auditing remain pending. See [project status](docs/PROJECT_STATUS.md) for current checks and validation limits.
+
 ## Features
 
 - **Task CRD (Cluster-scoped)**: `kubetask.kubetask.io/v1`, supports three task types
   - `Cron`: standard 5-field cron expressions (`robfig/cron`)
   - `OneTime`: executes immediately after creation
   - `Delay`: executes after a configurable delay
-- **Controller orchestration**: watches Tasks → creates/updates/deletes Kubernetes Jobs, and syncs Job status back to Task status
+- **Controller orchestration**: watches Tasks → creates/cleans up Kubernetes Jobs, and syncs Job status back to Task status
   - State machine: `Pending → Running → Succeeded / Failed / Suspended`
   - Keeps the latest 10 execution records plus cumulative success/failure counters
   - Finalizer + OwnerReference: deleting a Task automatically cleans up its Jobs
-  - Automatic retry on failure (`backoffLimit`, default 3)
+  - Kubernetes Job Controller handles retries (`backoffLimit`, default 3); Task counters reflect terminal Job outcomes
   - Timeout control (`activeDeadlineSeconds`) and automatic Job cleanup (`ttlSecondsAfterFinished`)
-  - Concurrency policies: `Allow` / `Forbid` / `Replace`
+  - Cron concurrency policies: `Allow` / `Forbid` / `Replace`
   - Manual trigger, suspend, and resume
 - **Workflow CRD (DAG orchestration, cluster-scoped, short name `wf`)**: flat DAGs for multi-task dependencies
   - `spec.tasks[]` declares nodes and their `dependsOn` edges directly, with no entrypoint / templates indirection
@@ -30,15 +32,16 @@ KubeTask describes tasks and workflows with custom resources (CRDs): a `Task` is
   - One Workflow CR represents one run; child Tasks are named `<workflow>-<node>` for deterministic, idempotent creation
 - **DAG validation and topology library (`internal/workflow`)**: pure logic package with no Kubernetes client dependency, so the controller only orchestrates
   - Kahn topological sort, dependency cycle detection, and parallel level computation (`Levels()`)
-  - Nine stable validation reasons (no tasks, duplicate name, self dependency, unknown dependency, duplicate dependency, missing template, and more) for `status.message` and Events
-  - 19 unit tests covering validation rules, topological order, and level computation
+  - Nine stable validation reasons (no tasks, duplicate name, self dependency, unknown dependency, duplicate dependency, missing template, and more) for API `reason` and controller `status.message`
+  - Unit tests cover validation, topological order, levels, and child Task naming
 - **REST API**: task CRUD, trigger, suspend/resume, stats, trends, and SSE streaming logs
 - **Web UI (bundled with the image)**: Vue 3 + Vite + ECharts with dashboard, task management, live logs, and workflow list/detail pages; Dagre lays out DAGs with status colors, zoom, node inspection, and child Task/log links; the Dockerfile builds the frontend automatically, so no separate deployment is needed
 - **SSE streaming logs**: reads Job Pod logs in real time through the Kubernetes API with `tail`, `sinceSeconds`, and `follow` support
-- **Configuration**: Flags → YAML config file → environment variables (Viper, `KUBETASK_` prefix)
+- **Configuration**: environment variables > YAML > defaults (Viper, `KUBETASK_` prefix); explicit authentication flags override environment variables
+- **Optional authentication**: ServiceAccount TokenReview and Bearer headers; in-memory UI Token settings support HTTP and fetch SSE; resource authorization remains pending
 - **Structured logging**: Zap with console / JSON formats
 - **Observability**: controller-runtime metrics, `/healthz` health check, `/readyz` readiness check
-- **Standalone mode**: gracefully degrades when no Kubernetes cluster is available — HTTP only, with a hint returned for API routes
+- **Standalone mode**: when Kubernetes configuration cannot be loaded and authentication is disabled, `/healthz` returns 200 and other requests return a 503 hint
 - **One-click deployment**: multi-stage Dockerfile, Helm chart, and a k3s install script
 
 ## Architecture
@@ -81,8 +84,9 @@ The controller and HTTP server run in the same process: `cmd/main.go` starts the
 
 ### Prerequisites
 
-- Go 1.25+
-- Docker
+- Go 1.25.7 (see `go.mod`)
+- Node.js 22.12+ and npm (for local frontend builds; the Dockerfile uses Node 22)
+- Docker (for image builds)
 - kubectl and a Kubernetes cluster (k3s recommended; tests run against envtest K8s v1.35.0)
 - Helm 3 (optional, for chart deployment)
 
@@ -91,6 +95,7 @@ The controller and HTTP server run in the same process: `cmd/main.go` starts the
 Make sure `~/.kube/config` points to your target cluster, then run:
 
 ```bash
+kubectl apply -f config/crd/bases/
 go run ./cmd/main.go
 ```
 
@@ -109,8 +114,8 @@ Default listeners:
 | `:8081` | Health `/healthz`, readiness `/readyz` |
 | `:8443` | Prometheus metrics (TLS secure mode by default) |
 
-> If no Kubernetes cluster is found, the process starts in standalone mode: only the HTTP server runs, and API routes return a 503 hint.
-> The Web UI directory is configured with `web-dir` (default `/web/dist`, bundled inside the image). When running the binary locally, build the frontend first with `cd web && npm run build` and set `KUBETASK_WEB_DIR=web/dist` to access the UI and API on the same port 8080.
+> If Kubernetes configuration cannot be loaded and authentication is disabled, standalone mode starts without the Web UI or the 8081/8443 listeners. Loading a configuration for an unreachable cluster does not guarantee this fallback.
+> The Web UI directory is configured with `web-dir` (default `/web/dist`, bundled inside the image). Run `npm ci` and `npm run build` in `web/`, return to the repository root, then set `KUBETASK_WEB_DIR=web/dist` before starting the backend. In PowerShell use `$env:KUBETASK_WEB_DIR = 'web/dist'`.
 
 ### One-Command k3s Deployment
 
@@ -172,7 +177,7 @@ The frontend source lives in `web/`. Production deployment does not need a separ
 
 ```bash
 cd web
-npm install
+npm ci
 npm run dev
 ```
 
@@ -376,7 +381,10 @@ auth-audience: ""      # Required when authentication is enabled, e.g. kubetask
 
 Authentication applies to all `/api/v1` endpoints; health checks and static assets stay public.
 With authentication enabled, failure to load Kubernetes configuration stops startup. TokenReview permissions are not probed at startup; review failures return 503 at request time.
-The frontend does not yet send tokens, so its API calls return 401 when authentication is enabled. See the
+Use **设置 Token** at the top of the Web UI to enter a ServiceAccount token. API requests and SSE logs
+send it in the Authorization header. Tokens stay in page memory and must be entered again after a reload.
+Replacing or clearing a token cancels old requests and reloads the current view. A 401 prompts for a new token;
+403/503 responses keep the credential. See the
 [API documentation](docs/API.md#11-认证配置与路由接入) for configuration, responses, and authorization boundaries.
 
 ## Project Structure
@@ -390,8 +398,10 @@ kubetask/
 │   ├── groupversion_info.go
 │   └── zz_generated.deepcopy.go    # auto-generated, do not edit
 ├── internal/
-│   ├── config/                     # Viper config (Flag → YAML → EnvVar)
+│   ├── config/                     # Viper: env > YAML > defaults; explicit auth flags override env
 │   ├── logger/                     # Zap structured logging
+│   ├── auth/                       # ServiceAccount TokenReview authentication
+│   ├── naming/                     # Shared Task name length limit
 │   ├── controller/                 # Task / Workflow Reconciler + envtest suites
 │   ├── workflow/                   # DAG validation / topological order / levels (pure logic + unit tests)
 │   ├── api/                        # Gin router + handlers (CRUD / logs / stats) and Web UI static serving
@@ -412,7 +422,7 @@ kubetask/
 
 The project is developed on Windows, where `make` is unavailable — call the Go toolchain directly:
 
-```bash
+```powershell
 # Build
 go build ./...
 
@@ -430,15 +440,17 @@ $gopath = $(go env GOPATH)
 
 Tests use envtest (etcd + kube-apiserver). Prepare the binaries and set `KUBEBUILDER_ASSETS` first:
 
-```bash
+```powershell
 go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.23
 & "$(go env GOPATH)\bin\setup-envtest" use 1.35.0 --bin-dir bin/k8s -p path
 
-$env:KUBEBUILDER_ASSETS = "bin/k8s/k8s/1.35.0-windows-amd64"
+$env:KUBEBUILDER_ASSETS = (Resolve-Path "bin/k8s/k8s/1.35.0-windows-amd64").Path
 go test ./... -count=1
 ```
 
 `internal/testutil` properly cleans up envtest processes on Windows to avoid leaking etcd / kube-apiserver.
+Default tests exclude the Kind suite behind the `e2e` build tag and the optional natural Token expiry test.
+After frontend changes run `npm test` and `npm run build` in `web/`; see [frontend development](web/README.md).
 
 ### Verification Pipeline After Every Edit
 
@@ -453,13 +465,15 @@ go test ./... -count=1
 
 | Version | Content | Status |
 |---------|---------|--------|
-| **v0.1.0** | MVP: Task CRD + Controller + REST API + Web UI (same-port bundle) + Helm/k3s deployment | ✅ Done |
-| **v0.2.0** | DAG workflows (Workflow CRD) | 🚧 In progress |
+| **v0.1.0** | MVP: Task CRD + Controller + REST API + Web UI (same-port bundle) + Helm/k3s deployment sources | ✅ Core implemented |
+| **v0.2.0** | Workflows, auth/multi-tenancy, alerts, scheduling enhancements | 🚧 Partially complete |
 | ↳ | Workflow CRD types, CEL validation, CRD / RBAC / sample generation | ✅ Done |
-| ↳ | `internal/workflow` DAG validation and topology library (19 unit tests) | ✅ Done |
-| ↳ | Workflow Reconciler: child Task orchestration, status write-back, failure propagation, `maxParallel` throttling, deletion cleanup (32 envtest specs + 7 unit tests) | ✅ Done |
+| ↳ | `internal/workflow` DAG validation, topology, and child Task naming | ✅ Done |
+| ↳ | Workflow Reconciler: child Task orchestration, status write-back, failure propagation, `maxParallel` throttling, deletion cleanup | ✅ Done |
 | ↳ | Workflow HTTP API and frontend DAG view (list/detail, Dagre layout, state refresh, child Task/log links) | ✅ Done |
-| ↳ | Multi-tenancy auth, Webhook/DingTalk/WeCom alerts, scheduling enhancements | 📋 Planned |
+| ↳ | ServiceAccount authentication and Web UI Token / SSE support | ✅ Implemented; disabled by default |
+| ↳ | RBAC resource authorization, namespace isolation, API keys, auditing | 🚧 Pending |
+| ↳ | Webhook/DingTalk/WeCom alerts and resource-aware scheduling | 📋 Planned |
 | **v0.3.0** | Multi-cluster management (k3s + ACK cloud-edge), smart off-peak scheduling, Prometheus + Grafana observability | 📋 Planned |
 
 See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the detailed design.

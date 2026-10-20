@@ -1,0 +1,115 @@
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  min-height: 112px;
+  transition: border-color 0.15s;
+}
+.stat-card:hover {
+  border-color: #aeb8c4;
+}
+.stat-label {
+  font-size: var(--text-control);
+  line-height: 1.3;
+  color: #6e6e73;
+}
+.stat-value {
+  font-size: var(--text-metric);
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+}
+.dashboard-charts {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: var(--space-5);
+  margin-top: var(--space-5);
+}
+.chart-panel {
+  padding: var(--space-5);
+  min-width: 0;
+}
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.panel-heading h2 {
+  font-size: var(--text-section);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.panel-heading > span {
+  font-size: var(--text-caption);
+  color: var(--muted);
+}
+.trend-chart,
+.chart-placeholder {
+  height: 280px;
+  width: 100%;
+  margin-top: 20px;
+}
+.chart-placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: var(--text-body);
+}
+.type-chart-wrap {
+  position: relative;
+  width: 156px;
+  height: 156px;
+  margin: 24px auto 20px;
+}
+.type-chart {
+  width: 100%;
+  height: 100%;
+}
+.donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.donut-center strong {
+  font-size: var(--text-title);
+  font-weight: 500;
+}
+.donut-center span {
+  font-size: var(--text-caption);
+  color: var(--muted);
+  margin-top: 4px;
+}
+.type-legend {
+  display: grid;
+  gap: 12px;
+}
+.type-legend > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #6e6e73;
+  font-size: var(--text-control);
+}
+.type-legend strong {
+  margin-left: auto;
+  color: #1d1d1f;
+  font-size: var(--text-control);
+  font-weight: 500;
+}
+.legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}

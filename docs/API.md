@@ -3,6 +3,8 @@
 本文档描述 KubeTask 当前实现的 HTTP API。接口以 `internal/api/router.go` 和
 `internal/api/handler/` 中的代码为准。Workflow（DAG 工作流）接口见第 9 节。
 
+最后核对：2026-10-20。共有 15 个 `/api/v1` 业务路由和公开 `/healthz`；检查结果见 [项目状态](PROJECT_STATUS.md)。
+
 ## 1. 基本信息
 
 - 默认 API 地址：`http://localhost:8080`
@@ -45,6 +47,41 @@ auth-audience: kubetask
 构造校验器，按开关将认证中间件传入路由。构造时不调用 TokenReview；运行时
 无法完成 TokenReview（包括权限不足）返回下述通用 503，不会转为匿名处理。
 
+部署时，**后端进程使用的 Kubernetes 身份**必须有
+`authentication.k8s.io/tokenreviews` 的 `create` 权限；这与调用者是否能读写
+Task 无关。当前 Helm values / ConfigMap 没有认证配置项，Helm controller role
+与 `config/rbac/role.yaml` 也未包含该权限，单设 `--set auth.enabled=true`
+不会开启认证。需要在 Deployment 中显式配置环境变量/启动参数或 YAML，
+并由集群管理员为后端身份单独绑定审查权限，例如：
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubetask-token-reviewer
+rules:
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubetask-token-reviewer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubetask-token-reviewer
+subjects:
+  - kind: ServiceAccount
+    name: kubetask                 # 替换为 Deployment 的 serviceAccountName
+    namespace: default             # 替换为部署 namespace
+```
+
+为客户端 ServiceAccount 申请 Token 时，应使用与 `auth-audience` 相同的 audience
+（例如 `kubectl create token <account> -n <namespace> --audience=kubetask`），
+再通过请求头或 UI 输入。以上部署步骤本轮未在真实集群执行。
+
 `NewRouter` 可接收可选的 Gin 中间件，并在注册端点前按传入顺序统一挂到
 `/api/v1` 路由组。调用方可显式传入已有的认证中间件：
 
@@ -66,7 +103,13 @@ router := api.NewRouter(k8sClient, clientset, addr,
 所属 namespace 不代表 Task 或 Workflow 的隔离边界。
 
 当前只实现身份认证，尚未接入 SubjectAccessReview 授权、API Key 或操作审计。
-前端尚未发送 Token；开启后其业务 API 请求也会收到 401，网页静态资源仍可访问。
+前端在页面上方提供「设置 Token」入口，输入原始 ServiceAccount Token（不含 `Bearer` 前缀）。
+普通 API 与 SSE 日志请求均通过 `Authorization` 请求头发送 Token，不放入 URL。
+Token 仅保存在当前页面内存中，不写入 localStorage/sessionStorage，刷新或关闭页面后需重新输入。
+未设置 Token 时保持匿名请求，兼容后端默认关闭认证的配置。
+更换或清除 Token 会取消旧请求、关闭日志流并重新加载当前视图（未提交表单会重置）；写操作不会自动重试。
+401 会展开 Token 输入提示；403 提示权限不足，503 提示服务不可用，均不会清除 Token。
+日志页通过 fetch 流式读取原有 SSE 协议，以支持请求头；正常 EOF 保留日志，停止或离开页面会取消连接。
 下文无 Token 的调用示例对应默认关闭认证的状态；开启后需要为 API 请求附加
 `Authorization` 请求头，例如：
 
@@ -177,7 +220,7 @@ Controller-runtime Manager 还会在 `health-probe-bind-address` 配置的端口
 | `backoffLimit` | int32 | 否 | 失败后的最大重试次数，默认 `3` |
 | `activeDeadlineSeconds` | int64 | 否 | 单次执行最长时间，单位为秒 |
 | `ttlSecondsAfterFinished` | int32 | 否 | Job 完成后保留时间，单位为秒 |
-| `concurrencyPolicy` | string | 否 | `Allow`、`Forbid` 或 `Replace`，默认 `Allow` |
+| `concurrencyPolicy` | string | 否 | Cron 调度采用 `Allow`、`Forbid` 或 `Replace`，默认 `Allow` |
 | `suspend` | bool | 否 | `true` 时暂停调度，不删除已运行 Job |
 | `clusterName` | string | 否 | 多集群场景预留，当前 Controller 未使用 |
 
@@ -433,7 +476,11 @@ POST /api/v1/tasks/:name/trigger
 ```
 
 不需要请求体。服务端写入 `kubetask.io/last-trigger` 注解，并清理
-`lastScheduleTime` 和 `activeJobs`，由 Controller 异步创建下一次执行。
+`lastScheduleTime` 和 `activeJobs`，由 Controller 异步按原任务类型处理。
+OneTime / Delay 若仍有关联 Job，只同步已有 Job；旧 Job 已清理且 trigger
+比上次执行新的情况下才会再次创建 Job。该接口不会删除旧 Job，也不绕过 suspend、
+Delay 的目标时间或 Cron 的调度规则。Workflow 子 Task 同样可调用，属于现有语义；
+重新运行整个工作流应创建新的 Workflow。
 
 响应：`200 OK`
 
@@ -654,7 +701,8 @@ Standalone 模式。
 
 Workflow 是 Cluster-scoped 的 DAG 编排资源：一个 Workflow CR 代表一次运行，
 Controller 按 `dependsOn` 依次创建子 Task（命名为 `<workflow>-<node>`）。
-数据模型见 [PROJECT_PLAN.md](../PROJECT_PLAN.md) 的 P2.1 节。
+数据模型以 `api/v1/workflow_types.go` 为准，运行语义与样例见
+[PROJECT_PLAN.md](../PROJECT_PLAN.md) 的 P2.1 节。
 
 ### 9.1 创建工作流
 
@@ -697,6 +745,12 @@ Content-Type: application/json
 > `CyclicDependency`、`InvalidTask`），CEL 规则覆盖的字段（`taskSpec.type`、`schedule`、
 > `delay`、`suspend`、`template`/`taskSpec` 互斥）由 API Server 直接拒绝。
 
+内联 `taskSpec` 只允许 OneTime，不允许 schedule/delay 或 `suspend: true`；
+`suspend: false` 可接受。命名模板中的调度字段不受相同 CEL 约束，Controller
+生成子 Task 时强制 OneTime 并清空 schedule/delay/suspend。
+子 Task 名称上限为 `internal/naming.MaxTaskNameLength`（46）；明确指定 Workflow
+名称时在 HTTP 入口校验，自动生成名称时入口跳过名称相关检查，由 Controller 兜底。
+
 ### 9.2 查询工作流列表
 
 ```http
@@ -705,6 +759,7 @@ GET /api/v1/workflows?page=1&pageSize=20&phase=Running
 
 支持的查询参数：`page`（默认 1）、`pageSize`（默认 20）、`phase`
 （`Pending` / `Running` / `Succeeded` / `Failed`）。
+`page < 1` 按 1，`pageSize < 1` 按 20 处理；空 phase 不筛选。
 
 ```json
 {
@@ -741,7 +796,7 @@ GET /api/v1/workflows/ci-pipeline
 ```
 
 - `nodes` / `edges` 来自 spec，并合并 `status.nodes` 的运行时状态（无状态时 `phase` 默认 `Pending`）。
-- `order` 是拓扑序，`levels` 是并行层，供前端（Vue Flow / Dagre）布局使用。
+- `order` 是拓扑序，`levels` 是并行层；当前前端使用 Dagre 布局与 Vue SVG 展示。
 - 若 spec 被 `kubectl` 改成非法（例如引用了不存在的模板），接口仍返回 `200`，
   但 `graph.validationError` 会带上原因，前端可以据此提示用户。
 - 工作流不存在时返回 `404`：`{"error":"workflow not found"}`。

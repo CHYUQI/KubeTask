@@ -1,5 +1,7 @@
 # kubetask - AI Agent Guide
 
+最后核对：2026-10-20。项目状态与验证边界见 [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)。
+
 ## Actual Project Structure
 
 ```
@@ -7,19 +9,29 @@ kubetask/
 ├── cmd/main.go                         ← 程序入口 (Controller + Gin HTTP 同进程)
 ├── api/v1/
 │   ├── task_types.go                   ← Task CRD 定义 (+kubebuilder 标记)
-│   ├── groupversion_info.go            ← GVK Scheme 注册 (自动生成)
+│   ├── workflow_types.go               ← Workflow 扁平 DAG + CEL 校验
+│   ├── groupversion_info.go            ← GVK Scheme 注册 (+scaffold 标记)
 │   └── zz_generated.deepcopy.go        ← DeepCopy 方法 (自动生成, DO NOT EDIT)
 ├── internal/
-│   ├── config/config.go                ← Viper 三层配置 (Flag → YAML → EnvVar)
+│   ├── config/config.go                ← EnvVar > YAML > 默认值；认证支持显式 Flag 覆盖
 │   ├── logger/logger.go                ← Zap Logger (AtomicLevel 动态改级别)
+│   ├── auth/serviceaccount.go          ← TokenReview 身份认证（尚无资源授权）
+│   ├── naming/naming.go                ← Task 名称长度唯一常量（46）
+│   ├── workflow/dag.go                 ← DAG 校验、拓扑排序、分层、子 Task 命名
+│   ├── testutil/                       ← envtest 跨平台停止与 Windows 孤儿进程清理
 │   ├── controller/
 │   │   ├── task_controller.go          ← Task Reconciler (3 种类型 + Finalizer)
+│   │   ├── workflow_controller.go      ← Workflow 编排 + Finalizer
 │   │   ├── task_controller_test.go     ← Controller 单元测试 (envtest)
 │   │   └── suite_test.go               ← envtest 入口 (etcd + kube-apiserver)
 │   └── api/
-│       ├── router.go                   ← Gin 路由注册 (10 个端点)
+│       ├── router.go                   ← 15 个业务路由 + /healthz
+│       ├── middleware/auth.go          ← Bearer 认证中间件 + 可信身份
+│       ├── webui.go                    ← 静态文件 + SPA 回退
 │       └── handler/
 │           ├── task_handler.go         ← Task CRUD + Stats + Trend handlers
+│           ├── workflow_handler.go     ← Workflow 创建/列表/详情/删除
+│           ├── workflow_graph.go       ← DAG 响应与非法定义降级展示
 │           ├── log_handler.go          ← SSE 流式日志 (需 kubernetes.Interface)
 │           └── handler_suite_test.go   ← API 单元测试 (httptest + envtest)
 ├── config/
@@ -27,6 +39,14 @@ kubetask/
 │   ├── rbac/role.yaml                  ← RBAC ClusterRole (自动生成, DO NOT EDIT)
 │   └── ...
 ├── bin/k8s/                            ← envtest 二进制 (etcd, kube-apiserver, kubectl)
+├── web/                                ← Vue 3 + Vite + ECharts + Dagre
+│   ├── src/api/{index,auth,http,logs}.js ← HTTP 客户端、内存 Token、fetch SSE
+│   ├── src/pages/                      ← 仪表盘、Task、Workflow、日志
+│   └── tests/                          ← Node 原生测试（认证 + DAG 布局）
+├── charts/kubetask/                     ← Helm Chart（含 crds/）
+├── deploy/k3s/install.sh                ← k3s 部署脚本
+├── test/integration/workflow_minikube.ps1 ← 真集群工作流验收
+├── docs/                               ← API、项目状态与阶段验收记录
 ├── Makefile                            ← 标准 Makefile (Windows 下不可用)
 ├── Dockerfile
 ├── PROJECT                             ← Kubebuilder 元数据 (自动生成, DO NOT EDIT)
@@ -46,12 +66,14 @@ kubetask/
 保留所有 `// +kubebuilder:scaffold:*` 注释。Kubebuilder CLI 在这些标记处注入代码。
 
 ### Dependencies & Versions
-- Go 1.25+ (当前 1.25.7，Kubebuilder 会自动升级 toolchain)
+- Go 1.25.7（以 go.mod 为准）
 - Kubebuilder v4.14.0
 - controller-gen v0.21.0
 - controller-runtime v0.23.3
 - K8s API v0.35.0 (envtest K8s v1.35.0)
 - Gin v1.12.0, Viper v1.21.0, Zap v1.27.0, robfig/cron v3.0.1
+- 前端声明：Vue ^3.5.39、Vue Router ^4.6.4、Vite ^8.1.1、ECharts ^6.1.0、Dagre 3.1.1；实际安装版本以 `web/package-lock.json` 为准。
+- Dockerfile 使用 Node 22 → Go 1.25 → Alpine 3.21；本地 Node 要满足 lockfile 中 Vite 的 engines 要求。
 
 ---
 
@@ -60,7 +82,7 @@ kubetask/
 ### `make` is NOT available
 所有 `make` 命令必须替换为直接调用：
 
-```bash
+```powershell
 # 替代 make manifests + make generate:
 $gopath = $(go env GOPATH)
 & "$gopath\bin\controller-gen" object rbac:roleName=manager-role crd `
@@ -71,7 +93,7 @@ $gopath = $(go env GOPATH)
 go build -o bin/manager.exe ./cmd/
 
 # 替代 make test:
-$env:KUBEBUILDER_ASSETS = "bin/k8s/k8s/1.35.0-windows-amd64"
+$env:KUBEBUILDER_ASSETS = (Resolve-Path "bin/k8s/k8s/1.35.0-windows-amd64").Path
 go test ./... -count=1
 
 # 替代 make lint-fix / make vet:
@@ -87,13 +109,13 @@ go vet ./...
 ```
 
 ### kubebuilder create api 必须加 `--make=false`
-```bash
+```powershell
 kubebuilder create api --group kubetask --version v1 --kind Task --make=false
 ```
 否则 CLI 会尝试运行 `make generate` 然后报错 `make: executable file not found`。
 
 ### envtest 初始化
-```bash
+```powershell
 # 1. 安装 setup-envtest
 go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.23
 
@@ -138,7 +160,7 @@ var _ = AfterSuite(func() {
 
 每次编辑后按顺序执行：
 
-```bash
+```powershell
 # 1. 编译
 go build ./...
 
@@ -155,9 +177,13 @@ $gopath = $(go env GOPATH)
 go build ./...
 
 # 5. 运行所有测试
-$env:KUBEBUILDER_ASSETS = "bin/k8s/k8s/1.35.0-windows-amd64"
+$env:KUBEBUILDER_ASSETS = (Resolve-Path "bin/k8s/k8s/1.35.0-windows-amd64").Path
 go test ./... -count=1
 ```
+
+`KUBEBUILDER_ASSETS` 使用绝对路径，避免包测试工作目录不同导致资源解析失败。
+默认 `go test ./...` 不包含 `//go:build e2e` 的 Kind 套件；Token 自然过期慢测也默认跳过。
+前端改动完成后，在 `web/` 执行 `npm test` 与 `npm run build`。
 
 ---
 
@@ -177,6 +203,8 @@ mgr.Start(...)                  // Controller 阻塞主 goroutine
 - `TaskHandler` 需要 `client.Client` (controller-runtime)
 - `LogHandler` 需要 `client.Client` + `kubernetes.Interface` (Pod 日志流)
 - 两个客户端都从 `mgr.GetConfig()` 创建
+- `WorkflowHandler` 需要 `client.Client`；详情图数据复用 `internal/workflow`。
+- `NewRouter(..., apiMiddleware ...gin.HandlerFunc)` 将可选中间件统一挂到 `/api/v1`。
 
 ### 测试架构
 - Controller 测试: Ginkgo + envtest + 直接调用 `Reconcile()`
@@ -190,7 +218,30 @@ mgr.Start(...)                  // Controller 阻塞主 goroutine
 - **三种类型**: OneTime (一次性), Cron (定时), Delay (延迟)
 - **Finalizer**: 保证删除 Task 时清理关联 Job
 - **OwnerReference**: Job → Task 的归属关系 (SetControllerReference)
-- **Status 子资源**: Controller 用 `Status().Update()`，API Handler 用 `Update()`
+- **Status 子资源**: Controller 用 `Status().Update()`；API spec/metadata 用 `Update()`
+
+API 修改 spec/metadata 用 `Update()`；Trigger 还会单独调用 `Status().Update()`。
+`backoffLimit` 交给 Kubernetes Job Controller 执行 Pod 重试，KubeTask 不实现自定义指数退避。
+完成判定以 Job 的 Complete/Failed 条件为准，不能把一次 Pod 失败计为整个任务失败。
+
+### Workflow 关键约定
+- 一个 Workflow CR 是一次运行；子 Task 为 `<workflow>-<node>`，OwnerReference 为 Workflow → Task → Job。
+- `internal/workflow.Build` 负责引用与环校验；`maxParallel=0` 表示不限制。
+- 普通节点依赖全成功才执行；`runOnFailure` 等全部依赖终态，至少一个 Failed/Skipped 才执行，否则 Skipped。
+- 内联 `taskSpec` 由 CRD CEL 约束；命名模板生成子 Task 时强制 OneTime，并清空 schedule/delay/suspend。
+- 已执行的 Workflow 终态不重跑；未创建子 Task 的校验失败在 spec 修正后允许恢复。
+- 不增加 Workflow 编辑器、重跑接口或新的后端语义来适配 UI。
+
+### 配置、认证与前端
+- 配置通常为环境变量 > YAML > 默认值；仅显式认证 Flag 优先于环境变量。三个既有 Metrics/Leader/Probe Flag 仅注册，未绑定加载器。
+- `auth-enabled=false` 默认匿名；开启必须设置非空 `auth-audience`，且必须能加载 Kubernetes 配置。
+- TokenReview 只确认 ServiceAccount 身份，尚无 SubjectAccessReview 资源授权或租户隔离。
+- 认证使用最多 3 秒的子 context；业务及 SSE 保留原请求 context，不得把认证超时施加到长连接。
+- 401 返回通用 Unauthorized，503 返回通用 Service Unavailable；不透传凭据或审查错误。
+- UI Token 只保留页面内存；全部业务请求用 Authorization 头，日志用 fetch SSE。更换/清除时取消旧请求，不自动重试写操作。
+- UI 支持 403 提示不代表后端已实现资源授权。
+- Helm 当前没有认证 values，也未授予 TokenReview create 权限；部署开启认证需显式配置并补权限，详见 API 文档。
+- 无 Kubernetes 配置且未开启认证时进入 Standalone：仅 `/healthz` 为 200，其余请求为 503，不挂载 SPA 或 Manager 探针。
 
 ### API 端点清单
 
@@ -234,7 +285,7 @@ mgr.Start(...)                  // Controller 阻塞主 goroutine
 ## Agent Workflow
 
 ### Step 1: Explore Before Editing
-- 使用 `grep` 和 `glob` 找相关代码
+- 使用 `rg` 和 `rg --files` 找相关代码；先检查 Git 工作区并保留已有修改
 - 读周围文件理解风格
 - 识别哪些是自动生成文件
 
@@ -247,6 +298,8 @@ mgr.Start(...)                  // Controller 阻塞主 goroutine
 - 编辑 `*_types.go`: 跑 controller-gen 重新生成
 - 编辑任何 `.go`: `go build ./...` + `go vet ./...` + `go test ./...`
 - 测试失败必须先修，再做其他改动
+- 文档更新以代码为准；历史验收保留原日期和证据，本次结果写入项目状态记录。
+- 核对文档时若其他工作仍在改同一工作区，结束前复验并注明结果对应当前快照。
 
 ### Step 4: Final Verification
 完整流水线: `go build ./... ; go vet ./... ; controller-gen ... ; go test ./...`
