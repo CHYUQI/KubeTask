@@ -81,7 +81,7 @@ func TestAuthenticatedLogStreamContinuesAfterAuthenticationTimeout(t *testing.T)
 	if err != nil {
 		t.Fatalf("open live SSE stream: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
 		t.Fatal("expected an authenticated SSE response")
 	}

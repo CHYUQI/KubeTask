@@ -71,18 +71,7 @@ func TestServiceAccountTokenAuthentication(t *testing.T) {
 		t.Fatal(err)
 	}
 	issueToken := func(audiences []string) string {
-		t.Helper()
-		expiration := int64(600)
-		request, err := admin.CoreV1().ServiceAccounts(namespace).CreateToken(ctx, account, &authenticationv1.TokenRequest{
-			Spec: authenticationv1.TokenRequestSpec{Audiences: audiences, ExpirationSeconds: &expiration},
-		}, metav1.CreateOptions{})
-		if err != nil {
-			t.Fatalf("issue local ServiceAccount token: %v", err)
-		}
-		if request.Status.Token == "" {
-			t.Fatal("TokenRequest returned an empty token")
-		}
-		return request.Status.Token
+		return requestServiceAccountToken(t, ctx, admin, namespace, account, audiences).Status.Token
 	}
 	validToken := issueToken([]string{audience})
 	wrongAudienceToken := issueToken([]string{"other-service"})
@@ -162,88 +151,117 @@ func TestServiceAccountTokenAuthentication(t *testing.T) {
 		})
 	}
 	t.Run("business RBAC is not yet enforced by HTTP API", func(t *testing.T) {
-		review, err := admin.AuthorizationV1().SubjectAccessReviews().Create(ctx, &authorizationv1.SubjectAccessReview{
-			Spec: authorizationv1.SubjectAccessReviewSpec{
-				User:   "system:serviceaccount:" + namespace + ":" + account,
-				Groups: []string{"system:serviceaccounts", "system:serviceaccounts:" + namespace, "system:authenticated"},
-				ResourceAttributes: &authorizationv1.ResourceAttributes{
-					Group: kubetaskv1.SchemeGroupVersion.Group, Resource: "tasks", Verb: "list",
-				},
-			},
-		}, metav1.CreateOptions{})
-		if err != nil || review.Status.Allowed {
-			t.Fatal("test caller must not have Kubernetes permission to list Tasks")
-		}
-		limitedClient, err := client.New(limitedConfig, client.Options{Scheme: scheme})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := limitedClient.List(ctx, &kubetaskv1.TaskList{}); !k8serrors.IsForbidden(err) {
-			t.Fatal("direct Kubernetes Task list must be forbidden")
-		}
-		a, err := auth.NewServiceAccountAuthenticator(admin.AuthenticationV1().TokenReviews(), audience)
-		if err != nil {
-			t.Fatal(err)
-		}
-		router := NewRouter(k8sClient, admin, "", middleware.Authentication(a))
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks", nil).WithContext(ctx)
-		req.Header.Set("Authorization", "Bearer "+validToken)
-		w := httptest.NewRecorder()
-		router.engine.ServeHTTP(w, req)
-		if w.Code != http.StatusOK {
-			t.Errorf("current authentication-only API returned %d, want documented 200 boundary", w.Code)
-		}
+		testBusinessRBACBoundary(t, ctx, k8sClient, admin, limitedConfig, audience, validToken)
 	})
 	t.Run("natural token expiration slow test", func(t *testing.T) {
-		if os.Getenv("KUBETASK_TEST_TOKEN_EXPIRY") != "true" {
-			t.Skip("set KUBETASK_TEST_TOKEN_EXPIRY=true and go test -timeout=15m to wait for real expiration")
-		}
-		slowCtx, stop := context.WithTimeout(context.Background(), 13*time.Minute)
-		defer stop()
-		expiration := int64(600)
-		issued, err := admin.CoreV1().ServiceAccounts(namespace).CreateToken(slowCtx, account, &authenticationv1.TokenRequest{
-			Spec: authenticationv1.TokenRequestSpec{Audiences: []string{audience}, ExpirationSeconds: &expiration},
-		}, metav1.CreateOptions{})
-		if err != nil {
-			t.Fatal("issue token for natural expiration")
-		}
-		a, err := auth.NewServiceAccountAuthenticator(admin.AuthenticationV1().TokenReviews(), audience)
-		if err != nil {
-			t.Fatal(err)
-		}
-		router := NewRouter(k8sClient, admin, "", middleware.Authentication(a))
-		request := func() int {
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks", nil).WithContext(slowCtx)
-			req.Header.Set("Authorization", "Bearer "+issued.Status.Token)
-			w := httptest.NewRecorder()
-			router.engine.ServeHTTP(w, req)
-			return w.Code
-		}
-		if request() != http.StatusOK {
-			t.Fatal("new token must authenticate before its expiration")
-		}
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		deadline := issued.Status.ExpirationTimestamp.Add(2 * time.Minute)
-		for {
-			select {
-			case <-slowCtx.Done():
-				t.Fatal("timed out waiting for natural token expiration")
-			case <-ticker.C:
-				if time.Now().Before(issued.Status.ExpirationTimestamp.Time) {
-					continue
+		testNaturalTokenExpiration(t, admin, k8sClient, namespace, account, audience)
+	})
+}
+
+func requestServiceAccountToken(
+	t *testing.T, ctx context.Context, admin kubernetes.Interface, namespace, account string, audiences []string,
+) *authenticationv1.TokenRequest {
+	t.Helper()
+	expiration := int64(600)
+	request, err := admin.CoreV1().ServiceAccounts(namespace).CreateToken(ctx, account, &authenticationv1.TokenRequest{
+		Spec: authenticationv1.TokenRequestSpec{Audiences: audiences, ExpirationSeconds: &expiration},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("issue local ServiceAccount token: %v", err)
+	}
+	if request.Status.Token == "" {
+		t.Fatal("TokenRequest returned an empty token")
+	}
+	return request
+}
+
+func testBusinessRBACBoundary(
+	t *testing.T, ctx context.Context, k8sClient client.Client, admin kubernetes.Interface,
+	limitedConfig *rest.Config, audience, token string,
+) {
+	a, err := auth.NewServiceAccountAuthenticator(admin.AuthenticationV1().TokenReviews(), audience)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := a.Authenticate(ctx, token)
+	if err != nil {
+		t.Fatal("test caller must authenticate before checking authorization")
+	}
+	review, err := admin.AuthorizationV1().SubjectAccessReviews().Create(ctx, &authorizationv1.SubjectAccessReview{
+		Spec: authorizationv1.SubjectAccessReviewSpec{
+			User:   user.Username,
+			UID:    user.UID,
+			Groups: user.Groups,
+			ResourceAttributes: &authorizationv1.ResourceAttributes{
+				Group: kubetaskv1.SchemeGroupVersion.Group, Resource: "tasks", Verb: "list",
+			},
+		},
+	}, metav1.CreateOptions{})
+	if err != nil || review.Status.Allowed {
+		t.Fatal("test caller must not have Kubernetes permission to list Tasks")
+	}
+	limitedClient, err := client.New(limitedConfig, client.Options{Scheme: k8sClient.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := limitedClient.List(ctx, &kubetaskv1.TaskList{}); !k8serrors.IsForbidden(err) {
+		t.Fatal("direct Kubernetes Task list must be forbidden")
+	}
+	router := NewRouter(k8sClient, admin, "", middleware.Authentication(a))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks", nil).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	router.engine.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("current authentication-only API returned %d, want documented 200 boundary", w.Code)
+	}
+}
+
+func testNaturalTokenExpiration(
+	t *testing.T, admin kubernetes.Interface, k8sClient client.Client, namespace, account, audience string,
+) {
+	if os.Getenv("KUBETASK_TEST_TOKEN_EXPIRY") != "true" {
+		t.Skip("set KUBETASK_TEST_TOKEN_EXPIRY=true and go test -timeout=15m to wait for real expiration")
+	}
+	slowCtx, stop := context.WithTimeout(context.Background(), 13*time.Minute)
+	defer stop()
+	issued := requestServiceAccountToken(t, slowCtx, admin, namespace, account, []string{audience})
+	a, err := auth.NewServiceAccountAuthenticator(admin.AuthenticationV1().TokenReviews(), audience)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouter(k8sClient, admin, "", middleware.Authentication(a))
+	request := func() int {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks", nil).WithContext(slowCtx)
+		req.Header.Set("Authorization", "Bearer "+issued.Status.Token)
+		w := httptest.NewRecorder()
+		router.engine.ServeHTTP(w, req)
+		return w.Code
+	}
+	if request() != http.StatusOK {
+		t.Fatal("new token must authenticate before its expiration")
+	}
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	deadline := issued.Status.ExpirationTimestamp.Add(2 * time.Minute)
+	for {
+		select {
+		case <-slowCtx.Done():
+			t.Fatal("timed out waiting for natural token expiration")
+		case <-ticker.C:
+			if time.Now().Before(issued.Status.ExpirationTimestamp.Time) {
+				continue
+			}
+			switch status := request(); status {
+			case http.StatusUnauthorized:
+				return
+			case http.StatusOK:
+				if time.Now().After(deadline) {
+					t.Fatal("token remained accepted beyond expiration tolerance")
 				}
-				switch status := request(); status {
-				case http.StatusUnauthorized:
-					return
-				case http.StatusOK:
-					if time.Now().After(deadline) {
-						t.Fatal("token remained accepted beyond expiration tolerance")
-					}
-				default:
-					t.Fatalf("unexpected HTTP status %d while checking expiration", status)
-				}
+			default:
+				t.Fatalf("unexpected HTTP status %d while checking expiration", status)
 			}
 		}
-	})
+	}
 }
