@@ -18,7 +18,9 @@ type Router struct {
 	server *http.Server
 }
 
-func NewRouter(k8sClient client.Client, clientset kubernetes.Interface, addr string) *Router {
+// NewRouter 将 apiMiddleware 按传入顺序挂到全部 /api/v1 端点。
+// /healthz 和网页静态资源不经过这些中间件；未传入中间件时保持原有行为。
+func NewRouter(k8sClient client.Client, clientset kubernetes.Interface, addr string, apiMiddleware ...gin.HandlerFunc) *Router {
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 
@@ -30,7 +32,7 @@ func NewRouter(k8sClient client.Client, clientset kubernetes.Interface, addr str
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	v1 := engine.Group("/api/v1")
+	v1 := engine.Group("/api/v1", apiMiddleware...)
 	{
 		v1.POST("/tasks", taskH.Create)
 		v1.GET("/tasks", taskH.List)

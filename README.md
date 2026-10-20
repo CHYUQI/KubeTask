@@ -335,7 +335,10 @@ spec:
 
 ## 配置
 
-配置优先级：命令行 Flag > YAML 配置文件 > 环境变量（`KUBETASK_` 前缀）。
+配置通过 YAML 和环境变量（`KUBETASK_` 前缀）加载，环境变量优先于 YAML。
+新增的认证项还支持命令行参数，优先级为：显式 Flag > 环境变量 > YAML > 默认值。
+既有的 `metrics-bind-address`、`leader-elect`、`health-probe-bind-address` 三项 Flag
+仍仅注册，未绑定到配置加载器。
 
 配置文件默认查找当前目录或 `./config` 下的 `kubetask.yaml`，也可以通过 `--config <path>` 指定：
 
@@ -351,6 +354,8 @@ health-probe-bind-address: ":8081"
 leader-elect: true
 enable-http2: false
 web-dir: /web/dist      # Web UI 静态资源目录（容器内默认）
+auth-enabled: false    # 开启后 API 要求 ServiceAccount Bearer Token
+auth-audience: ""      # 开启认证时必须显式指定，例如 kubetask
 ```
 
 | 配置项 | 环境变量 | 默认值 | 说明 |
@@ -358,6 +363,8 @@ web-dir: /web/dist      # Web UI 静态资源目录（容器内默认）
 | `api-host` | `KUBETASK_API_HOST` | `0.0.0.0` | HTTP 监听地址 |
 | `api-port` | `KUBETASK_API_PORT` | `8080` | HTTP 端口 |
 | `web-dir` | `KUBETASK_WEB_DIR` | `/web/dist` | Web UI 静态资源目录；不存在时仅禁用 UI，不影响 API |
+| `auth-enabled` | `KUBETASK_AUTH_ENABLED` | `false` | 开启 HTTP API 的 ServiceAccount 身份认证；也支持 `--auth-enabled` |
+| `auth-audience` | `KUBETASK_AUTH_AUDIENCE` | 空字符串 | 预期 Token audience，开启时必填；也支持 `--auth-audience` |
 | `log-level` | `KUBETASK_LOG_LEVEL` | `info` | 日志级别 |
 | `log-format` | `KUBETASK_LOG_FORMAT` | `console` | 日志格式 |
 | `metrics-bind-address` | `KUBETASK_METRICS_BIND_ADDRESS` | `:8443` | Metrics 地址 |
@@ -367,6 +374,11 @@ web-dir: /web/dist      # Web UI 静态资源目录（容器内默认）
 | `enable-http2` | `KUBETASK_ENABLE_HTTP2` | `false` | 是否启用 HTTP/2 |
 
 > `database-*` 配置项已预留（PostgreSQL 持久化规划中），当前版本尚未使用。
+
+认证开关控制全部 `/api/v1` 端点，健康检查与静态资源保持公开。开启时无法加载
+Kubernetes 配置会直接退出；启动不主动探测 TokenReview 权限，运行时审查失败返回 503。
+前端尚未接入 Token，开启后其 API 请求会返回 401。认证配置、错误响应与授权边界见
+[API 文档](docs/API.md#11-认证配置与路由接入)。
 
 ## 项目结构
 

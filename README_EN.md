@@ -335,7 +335,9 @@ Other constraints: a node must set exactly one of `template` or `taskSpec`; node
 
 ## Configuration
 
-Priority: command-line flags > YAML config file > environment variables (`KUBETASK_` prefix).
+Configuration is loaded from YAML and environment variables (`KUBETASK_` prefix), with environment variables taking precedence.
+The new authentication settings also support CLI flags: explicit flags > environment variables > YAML > defaults.
+The existing `metrics-bind-address`, `leader-elect`, and `health-probe-bind-address` flags remain registered without being bound to the configuration loader.
 
 The config file is looked up as `kubetask.yaml` in the current directory or `./config`, and can be overridden with `--config <path>`:
 
@@ -351,6 +353,8 @@ health-probe-bind-address: ":8081"
 leader-elect: true
 enable-http2: false
 web-dir: /web/dist      # Web UI static directory (default inside the image)
+auth-enabled: false    # Require ServiceAccount Bearer tokens for the API when enabled
+auth-audience: ""      # Required when authentication is enabled, e.g. kubetask
 ```
 
 | Key | Env var | Default | Description |
@@ -358,6 +362,8 @@ web-dir: /web/dist      # Web UI static directory (default inside the image)
 | `api-host` | `KUBETASK_API_HOST` | `0.0.0.0` | HTTP listen address |
 | `api-port` | `KUBETASK_API_PORT` | `8080` | HTTP port |
 | `web-dir` | `KUBETASK_WEB_DIR` | `/web/dist` | Web UI static directory; when missing, only the UI is disabled and the API keeps running |
+| `auth-enabled` | `KUBETASK_AUTH_ENABLED` | `false` | Enable ServiceAccount authentication for the HTTP API; also supports `--auth-enabled` |
+| `auth-audience` | `KUBETASK_AUTH_AUDIENCE` | Empty string | Expected token audience, required when enabled; also supports `--auth-audience` |
 | `log-level` | `KUBETASK_LOG_LEVEL` | `info` | Log level |
 | `log-format` | `KUBETASK_LOG_FORMAT` | `console` | Log format |
 | `metrics-bind-address` | `KUBETASK_METRICS_BIND_ADDRESS` | `:8443` | Metrics address |
@@ -367,6 +373,11 @@ web-dir: /web/dist      # Web UI static directory (default inside the image)
 | `enable-http2` | `KUBETASK_ENABLE_HTTP2` | `false` | Enable HTTP/2 |
 
 > The `database-*` keys are reserved (planned PostgreSQL persistence) and are not used by the current version.
+
+Authentication applies to all `/api/v1` endpoints; health checks and static assets stay public.
+With authentication enabled, failure to load Kubernetes configuration stops startup. TokenReview permissions are not probed at startup; review failures return 503 at request time.
+The frontend does not yet send tokens, so its API calls return 401 when authentication is enabled. See the
+[API documentation](docs/API.md#11-认证配置与路由接入) for configuration, responses, and authorization boundaries.
 
 ## Project Structure
 

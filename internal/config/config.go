@@ -1,6 +1,7 @@
 package config
 
 import (
+	"flag"
 	"fmt"
 	"strings"
 
@@ -21,6 +22,9 @@ type Config struct {
 	APIHost string `mapstructure:"api-host"`
 	WebDir  string `mapstructure:"web-dir"`
 
+	AuthEnabled  bool   `mapstructure:"auth-enabled"`
+	AuthAudience string `mapstructure:"auth-audience"`
+
 	DatabaseHost     string `mapstructure:"database-host"`
 	DatabasePort     int    `mapstructure:"database-port"`
 	DatabaseUser     string `mapstructure:"database-user"`
@@ -31,7 +35,9 @@ type Config struct {
 	ConfigFile string
 }
 
-func LoadConfig(configFile string) (*Config, error) {
+// LoadConfig 读取 YAML 和环境变量，并仅用显式传入的认证 flag 覆盖它们。
+// flags 可为 nil；其余既有 flag 的加载行为保持不变。
+func LoadConfig(configFile string, flags *flag.FlagSet) (*Config, error) {
 	v := viper.New()
 
 	v.SetDefault("metrics-bind-address", ":8443")
@@ -46,6 +52,9 @@ func LoadConfig(configFile string) (*Config, error) {
 	v.SetDefault("api-port", 8080)
 	v.SetDefault("api-host", "0.0.0.0")
 	v.SetDefault("web-dir", "/web/dist")
+
+	v.SetDefault("auth-enabled", false)
+	v.SetDefault("auth-audience", "")
 
 	v.SetDefault("database-host", "localhost")
 	v.SetDefault("database-port", 5432)
@@ -73,9 +82,23 @@ func LoadConfig(configFile string) (*Config, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 	v.AutomaticEnv()
 
+	if flags != nil {
+		flags.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "auth-enabled", "auth-audience":
+				v.Set(f.Name, f.Value.String())
+			}
+		})
+	}
+
 	cfg := &Config{}
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	cfg.AuthAudience = strings.TrimSpace(cfg.AuthAudience)
+	if cfg.AuthEnabled && cfg.AuthAudience == "" {
+		return nil, fmt.Errorf("auth-audience is required when auth-enabled is true")
 	}
 
 	cfg.ConfigFile = v.ConfigFileUsed()
