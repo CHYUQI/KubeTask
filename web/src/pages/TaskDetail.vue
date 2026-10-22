@@ -16,36 +16,26 @@
           label="查看日志"
           :to="'/tasks/' + task.metadata.name + '/logs'"
         />
-        <details
-          class="action-menu"
-          @focusout="closeActionMenu"
-          @keydown.esc="$event.currentTarget.open = false"
-        >
-          <summary>更多</summary>
-          <div class="action-menu-items">
-            <button
-              v-if="task.spec?.suspend"
-              @click="doResume"
-              :disabled="acting"
-            >
-              恢复
-            </button>
-            <button v-else @click="doSuspend" :disabled="acting">暂停</button>
-            <button @click="doDelete" class="danger" :disabled="acting">
-              删除
-            </button>
-          </div>
-        </details>
+        <ActionMenu
+          :items="[
+            {
+              label: task.spec?.suspend ? '恢复' : '暂停',
+              disabled: acting,
+              action: task.spec?.suspend ? doResume : doSuspend,
+            },
+            { label: '删除', danger: true, disabled: acting, action: doDelete },
+          ]"
+        />
       </template>
     </PageHeading>
     <div v-if="loading" class="loading">加载中...</div>
     <NoCluster v-else-if="clusterError" :message="clusterError" />
-    <div v-else-if="error" class="error-msg">{{ error }}</div>
+    <GlassContainer v-else-if="error" class="error-msg">{{ error }}</GlassContainer>
 
     <template v-else-if="task">
       <div class="row">
         <!-- 基本信息 -->
-        <div class="card glass-panel">
+        <GlassContainer class="card">
           <h2>基本信息</h2>
           <dl>
             <dt>类型</dt>
@@ -89,18 +79,18 @@
               {{ formatTime(task.status.lastCompletionTime) }}
             </dd>
           </dl>
-        </div>
+        </GlassContainer>
 
         <!-- YAML 预览 -->
-        <div class="card glass-panel">
+        <GlassContainer class="card">
           <h2>YAML</h2>
           <pre class="yaml">{{ yamlPreview }}</pre>
-        </div>
+        </GlassContainer>
       </div>
 
       <!-- 执行历史 -->
-      <div
-        class="card glass-panel"
+      <GlassContainer
+        class="card"
         v-if="task.status?.executionHistory?.length"
       >
         <h2>执行历史</h2>
@@ -133,12 +123,13 @@
             </tbody>
           </table>
         </div>
-      </div>
+      </GlassContainer>
     </template>
   </div>
 </template>
 
 <script setup>
+import GlassContainer from "@/components/GlassContainer.vue";
 import { ref, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { api } from "@/api";
@@ -146,6 +137,7 @@ import { useClusterStatus } from "@/composables/cluster";
 import NoCluster from "@/components/NoCluster.vue";
 import PageHeading from "@/components/PageHeading.vue";
 import GlassButton from "@/components/GlassButton.vue";
+import ActionMenu from "@/components/ActionMenu.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -155,11 +147,6 @@ const loading = ref(true);
 const error = ref("");
 const acting = ref(false);
 const task = ref(null);
-
-function closeActionMenu(event) {
-  if (!event.currentTarget.contains(event.relatedTarget))
-    event.currentTarget.open = false;
-}
 
 const yamlPreview = computed(() => {
   if (!task.value) return "";

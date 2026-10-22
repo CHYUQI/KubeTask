@@ -298,7 +298,7 @@ func TestBuildRejectsTaskWithBothExecutors(t *testing.T) {
 			{Name: "build", Template: "go-build", TaskSpec: inlineSpec()},
 		},
 		TaskTemplates: map[string]kubetaskv1.TaskSpec{
-			"go-build": {Type: kubetaskv1.TaskTypeOneTime, Image: "golang:1.25"},
+			"go-build": {Type: kubetaskv1.TaskTypeOneTime, Image: "golang:1.27.3"},
 		},
 	}
 
@@ -312,7 +312,7 @@ func TestBuildRejectsUnknownTemplate(t *testing.T) {
 			{Name: "build", Template: "missing"},
 		},
 		TaskTemplates: map[string]kubetaskv1.TaskSpec{
-			"go-build": {Type: kubetaskv1.TaskTypeOneTime, Image: "golang:1.25"},
+			"go-build": {Type: kubetaskv1.TaskTypeOneTime, Image: "golang:1.27.3"},
 		},
 	}
 
@@ -328,7 +328,7 @@ func TestBuildAcceptsTemplateReference(t *testing.T) {
 			{Name: "test", DependsOn: []string{"build"}, TaskSpec: inlineSpec()},
 		},
 		TaskTemplates: map[string]kubetaskv1.TaskSpec{
-			"go-build": {Type: kubetaskv1.TaskTypeOneTime, Image: "golang:1.25"},
+			"go-build": {Type: kubetaskv1.TaskTypeOneTime, Image: "golang:1.27.3"},
 		},
 	}
 

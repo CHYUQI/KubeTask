@@ -32,8 +32,8 @@
     <div v-if="loading" class="loading">加载中…</div>
     <NoCluster v-else-if="clusterError" :message="clusterError" />
     <template v-else>
-      <p v-if="error" class="error-msg" role="alert">{{ error }}</p>
-      <div v-if="tasks.length" class="table-panel content-panel">
+      <GlassContainer as="p" v-if="error" class="error-msg" role="alert">{{ error }}</GlassContainer>
+      <GlassContainer v-if="tasks.length" class="table-panel">
         <div class="table-wrap">
           <table>
             <thead>
@@ -134,10 +134,10 @@
             </tbody>
           </table>
         </div>
-      </div>
-      <div v-else-if="!error" class="empty content-panel">
+      </GlassContainer>
+      <GlassContainer v-else-if="!error" class="empty">
         暂无任务。<router-link to="/tasks/create">创建任务</router-link>
-      </div>
+      </GlassContainer>
       <div v-if="total > PAGE_SIZE" class="pager">
         <button :disabled="page <= 1" @click="fetchTasks(page - 1)">
           上一页</button
@@ -150,6 +150,7 @@
   </div>
 </template>
 <script setup>
+import GlassContainer from "@/components/GlassContainer.vue";
 import { ref, computed, onMounted } from "vue";
 import { useRoute } from "vue-router";
 import PageHeading from "@/components/PageHeading.vue";

@@ -1,12 +1,17 @@
 import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "vite";
-import { prepareNavigationElements } from "../src/components/navigation-material.js";
+import {
+  prepareNavigationElements,
+  NAVIGATION_CATALOG_HEIGHT,
+  NAVIGATION_FRAME_HEIGHT,
+} from "../src/components/navigation-material.js";
 
 let server, buildBottomTabs, computeElementTransform, defaults, palette;
 before(async () => {
   server = await createServer({
-    server: { middlewareMode: true },
+    optimizeDeps: { noDiscovery: true, include: [] },
+    server: { middlewareMode: true, hmr: false, ws: false },
     appType: "custom",
   });
   ({ buildBottomTabs } = await server.ssrLoadModule(
@@ -29,7 +34,7 @@ function elements() {
   return prepareNavigationElements(
     buildBottomTabs(
       456,
-      208,
+      NAVIGATION_CATALOG_HEIGHT,
       () => {},
       defaults,
       () => {},
@@ -39,12 +44,23 @@ function elements() {
   );
 }
 
-test("navigation backing stays fixed through the upstream tab press and drag transforms", () => {
+test("navigation backing retains the upstream group, material and press/drag transforms", () => {
   const backing = elements().find((element) => element.isBottomTabContainer);
   assert.ok(
     backing,
     "keep the upstream marker needed for the glass backdrop snapshot",
   );
+  const source = buildBottomTabs(
+    456,
+    NAVIGATION_CATALOG_HEIGHT,
+    () => {},
+    defaults,
+    () => {},
+    null,
+    palette,
+  ).elements.find((element) => element.id === backing.id);
+  assert.deepEqual(backing, source);
+  assert.equal(backing.isBottomTabContainer.groupId, "tabs3");
   for (const fraction of [0, 0.35, 1, 1.7, 2]) {
     const renderer = {
       toggleStates: new Map([
@@ -67,15 +83,33 @@ test("navigation backing stays fixed through the upstream tab press and drag tra
       undefined,
       backing.rect,
     );
-    assert.equal(transform.sx, backing.rect.x);
-    assert.equal(transform.sy, backing.rect.y);
-    assert.equal(transform.sw, backing.rect.w);
-    assert.equal(transform.sh, backing.rect.h);
-    assert.equal(transform.togglePressProgress, 0);
+    const original = computeElementTransform.call(
+      renderer,
+      source,
+      undefined,
+      source.rect,
+    );
+    assert.deepEqual(transform, original);
+    assert.ok(transform.sw > backing.rect.w);
+    assert.equal(transform.togglePressProgress, 1);
   }
 });
 
-test("only the selected indicator retains the original moving and elastic transform", () => {
+test("cropped navigation frame retains the visible material and backing shadow", () => {
+  const visible = elements();
+  const backing = visible.find((element) => element.isBottomTabContainer);
+  assert.ok(NAVIGATION_FRAME_HEIGHT < NAVIGATION_CATALOG_HEIGHT);
+  for (const element of visible) {
+    assert.ok(element.rect.y >= 0);
+    assert.ok(element.rect.y + element.rect.h <= NAVIGATION_FRAME_HEIGHT);
+  }
+  assert.ok(
+    backing.rect.y + backing.rect.h + backing.outerShadow.radius <=
+      NAVIGATION_FRAME_HEIGHT,
+  );
+});
+
+test("selected indicator retains the original moving and elastic transform", () => {
   const indicator = elements().find((element) => element.isBottomTabIndicator);
   assert.equal(indicator.isBottomTabIndicator.groupId, "tabs3");
   const renderer = {

@@ -24,9 +24,9 @@
     </div>
     <div v-if="loading" class="loading">加载中…</div>
     <NoCluster v-else-if="clusterError" :message="clusterError" />
-    <p v-else-if="error" class="error-msg" role="alert">{{ error }}</p>
+    <GlassContainer as="p" v-else-if="error" class="error-msg" role="alert">{{ error }}</GlassContainer>
     <template v-else>
-      <div v-if="workflows.length" class="table-panel content-panel">
+      <GlassContainer v-if="workflows.length" class="table-panel">
         <div class="table-wrap">
           <table>
             <thead>
@@ -77,13 +77,13 @@
             </tbody>
           </table>
         </div>
-      </div>
-      <div v-else class="empty content-panel">
+      </GlassContainer>
+      <GlassContainer v-else class="empty">
         {{ filterPhase ? "没有符合当前状态的工作流。" : "暂无工作流。"
         }}<router-link v-if="!filterPhase" to="/workflows/create"
           >创建工作流</router-link
         >
-      </div>
+      </GlassContainer>
       <div v-if="total > PAGE_SIZE" class="pager">
         <button :disabled="page <= 1" @click="fetchWorkflows(page - 1)">
           上一页</button
@@ -99,6 +99,7 @@
   </div>
 </template>
 <script setup>
+import GlassContainer from "@/components/GlassContainer.vue";
 import { ref, computed, onMounted } from "vue";
 import PageHeading from "@/components/PageHeading.vue";
 import GlassButton from "@/components/GlassButton.vue";

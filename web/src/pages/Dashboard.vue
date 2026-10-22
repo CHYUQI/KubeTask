@@ -6,25 +6,27 @@
         :disabled="loading"
         @click="loadDashboard"
       />
-      <GlassButton label="创建任务" tone="accent" to="/tasks/create" />
     </PageHeading>
     <div class="stat-cards" :aria-busy="loading">
-      <router-link
+      <GlassContainer
         v-for="card in statCards"
         :key="card.key"
         :to="{ path: '/tasks', query: card.phase ? { phase: card.phase } : {} }"
-        class="stat-card glass-panel"
+        class="stat-card"
       >
         <span class="stat-label">{{ card.label }}</span
         ><span class="stat-value">{{
           loading ? "…" : loaded ? stats[card.key].toLocaleString() : "—"
         }}</span>
-      </router-link>
+      </GlassContainer>
     </div>
-    <NoCluster v-if="clusterError" :message="clusterError" />
-    <div v-else-if="error" class="error-msg" role="alert">{{ error }}</div>
+    <GlassContainer v-if="clusterError" class="no-cluster">
+      <h2>未连接 Kubernetes 集群</h2>
+      <p>{{ clusterError }}</p>
+    </GlassContainer>
+    <GlassContainer v-else-if="error" class="error-msg" role="alert">{{ error }}</GlassContainer>
     <div v-if="!clusterError && !error" class="dashboard-charts">
-      <section class="chart-panel glass-panel">
+      <GlassContainer as="section" class="chart-panel">
         <div class="panel-heading">
           <h2>执行趋势</h2>
           <span>全部记录</span>
@@ -45,8 +47,8 @@
           aria-label="成功与失败次数的历史执行趋势图"
           role="img"
         />
-      </section>
-      <section class="chart-panel type-panel glass-panel">
+      </GlassContainer>
+      <GlassContainer as="section" class="chart-panel type-panel">
         <div class="panel-heading"><h2>任务类型</h2></div>
         <div class="type-chart-wrap">
           <div
@@ -73,7 +75,7 @@
             }}</strong>
           </div>
         </div>
-      </section>
+      </GlassContainer>
     </div>
   </div>
 </template>
@@ -89,7 +91,7 @@ import {
 import { CanvasRenderer } from "echarts/renderers";
 import { api } from "@/api";
 import { useClusterStatus } from "@/composables/cluster";
-import NoCluster from "@/components/NoCluster.vue";
+import GlassContainer from "@/components/GlassContainer.vue";
 import PageHeading from "@/components/PageHeading.vue";
 import GlassButton from "@/components/GlassButton.vue";
 echarts.use([

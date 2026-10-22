@@ -2,7 +2,7 @@
 
 ## 项目计划书与实现进度
 
-最后核对：2026-10-20。MVP 与 P2.0/P2.1 已实现，P2.2 认证部分完成。版本号为规划标签，不表示已发布；当前 Chart/image 默认标签仍为 v0.1.0。当前验证结果见 [项目状态](docs/PROJECT_STATUS.md)，历史节点保留其当时的测试数量与验收范围。
+最后核对：2026-10-22。MVP 与 P2.0/P2.1 已实现，P2.2 认证部分完成。版本号为规划标签，不表示已发布；当前 Chart/image 默认标签仍为 v0.1.0。当前验证结果见 [项目状态](docs/PROJECT_STATUS.md)，历史节点保留其当时的测试数量与验收范围。
 
 ---
 
@@ -12,7 +12,7 @@
 |------|------|
 | 项目名称 | KubeTask（智能云原生任务调度系统） |
 | 版本 | v0.1.0 为当前 Chart/image 默认标签，v0.2.0 规划进行中 |
-| 开发语言 | Go 1.25.7 |
+| 开发语言 | Go 1.27.3 |
 | 核心目标 | 基于 Kubernetes 构建生产可用、易部署、智能调度的分布式任务调度平台，解决传统 CronJob 在企业中面临的可见性差、运维复杂、调度不智能、缺乏依赖编排等问题。 |
 | 项目定位 | **轻量级 + 可扩展 + 学习深度优先**，从零搭建每一行代码，适用于中小团队、边缘计算（k3s）、云原生学习与生产实践 |
 | 交付形态 | Controller + Gin + Vue 静态资源同镜像；Helm / k3s 部署脚本；kubectl 管理 CR |
@@ -89,7 +89,7 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 - [x] 前端 fetch SSE、自动滚动、行号、级别高亮、搜索过滤
 
 #### P1.6 部署与运维
-- [x] Dockerfile：Node 22 → Go 1.25 → Alpine 3.21，携带 `/web/dist`
+- [x] Dockerfile：Node 22 → Go 1.27.3 → Alpine 3.21，携带 `/web/dist`
 - [x] Helm Chart：CRD 位于 `charts/kubetask/crds/`，Service / Ingress 指向 8080
 - [x] k3s 安装脚本 `deploy/k3s/install.sh`
 - [x] Makefile（Unix）；Windows 直接调用工具链，命令见 AGENTS.md
@@ -147,12 +147,12 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
     taskTemplates:
       go-build:
         type: OneTime
-        image: golang:1.25
+        image: golang:1.27.3
         command: ["go", "build", "./..."]
         backoffLimit: 3
       go-test:
         type: OneTime
-        image: golang:1.25
+        image: golang:1.27.3
         command: ["go", "test", "./..."]
       notify:
         type: OneTime
@@ -460,7 +460,7 @@ Manager 在默认 `:8081` 提供 `/healthz`、`/readyz`；业务端口 `:8080` �
 
 ## 十一、部署方案
 
-本地开发使用 Go 1.25.7、Node 22.12+、kubectl 与 Kubernetes 配置；无需 PostgreSQL。先安装 CRD，构建前端后在项目根目录启动：
+本地开发使用 Go 1.27.3、Node 22.12+、kubectl 与 Kubernetes 配置；无需 PostgreSQL。先安装 CRD，构建前端后在项目根目录启动：
 
 ```powershell
 kubectl apply -f config/crd/bases/

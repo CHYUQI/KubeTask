@@ -1,6 +1,6 @@
 # kubetask - AI Agent Guide
 
-最后核对：2026-10-20。项目状态与验证边界见 [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)。
+最后核对：2026-10-22。项目状态与验证边界见 [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)。
 
 ## Actual Project Structure
 
@@ -66,14 +66,14 @@ kubetask/
 保留所有 `// +kubebuilder:scaffold:*` 注释。Kubebuilder CLI 在这些标记处注入代码。
 
 ### Dependencies & Versions
-- Go 1.25.7（以 go.mod 为准）
+- Go 1.27.3（以 go.mod 为准）
 - Kubebuilder v4.14.0
 - controller-gen v0.21.0
 - controller-runtime v0.23.3
 - K8s API v0.35.0 (envtest K8s v1.35.0)
 - Gin v1.12.0, Viper v1.21.0, Zap v1.27.0, robfig/cron v3.0.1
 - 前端声明：Vue ^3.5.39、Vue Router ^4.6.4、Vite ^8.1.1、ECharts ^6.1.0、Dagre 3.1.1；实际安装版本以 `web/package-lock.json` 为准。
-- Dockerfile 使用 Node 22 → Go 1.25 → Alpine 3.21；本地 Node 要满足 lockfile 中 Vite 的 engines 要求。
+- Dockerfile 使用 Node 22 → Go 1.27.3 → Alpine 3.21；本地 Node 要满足 lockfile 中 Vite 的 engines 要求。
 
 ---
 

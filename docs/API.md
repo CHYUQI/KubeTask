@@ -726,8 +726,8 @@ Content-Type: application/json
       { "name": "notify-failure", "dependsOn": ["test"], "runOnFailure": true, "template": "notify" }
     ],
     "taskTemplates": {
-      "go-build": { "type": "OneTime", "image": "golang:1.25", "command": ["go", "build", "./..."] },
-      "go-test": { "type": "OneTime", "image": "golang:1.25", "command": ["go", "test", "./..."] },
+      "go-build": { "type": "OneTime", "image": "golang:1.27.3", "command": ["go", "build", "./..."] },
+      "go-test": { "type": "OneTime", "image": "golang:1.27.3", "command": ["go", "test", "./..."] },
       "notify": { "type": "OneTime", "image": "curlimages/curl", "command": ["sh", "-c", "echo workflow failed"] }
     }
   }

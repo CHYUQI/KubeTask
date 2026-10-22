@@ -12,7 +12,7 @@ COPY web/ ./
 RUN npm run build
 
 # Stage 2: 编译 Go 二进制
-FROM golang:1.25-alpine AS builder
+FROM golang:1.27.3-alpine AS builder
 
 #proxy for go mod
 ENV GOPROXY=https://goproxy.cn,direct

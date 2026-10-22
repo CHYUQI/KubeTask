@@ -20,14 +20,14 @@
 
     <div v-if="loading" class="loading">加载中...</div>
     <NoCluster v-else-if="clusterError" :message="clusterError" />
-    <div v-else-if="error" class="error-msg" role="alert">{{ error }}</div>
+    <GlassContainer v-else-if="error" class="error-msg" role="alert">{{ error }}</GlassContainer>
 
     <template v-else-if="workflow">
-      <div v-if="refreshError" class="warning" role="alert">
+      <GlassContainer v-if="refreshError" class="warning" role="alert">
         自动刷新失败，当前显示上次成功获取的数据：{{ refreshError }}
-      </div>
-      <section
-        class="card glass-panel workflow-summary"
+      </GlassContainer>
+      <GlassContainer as="section"
+        class="card workflow-summary"
         aria-labelledby="workflow-info"
       >
         <h2 id="workflow-info">基本信息</h2>
@@ -70,15 +70,15 @@
             </dd>
           </div>
         </dl>
-      </section>
+      </GlassContainer>
 
-      <div v-if="graph?.validationError" class="warning" role="alert">
+      <GlassContainer v-if="graph?.validationError" class="warning" role="alert">
         工作流定义校验未通过：{{ graph.validationError }}
-      </div>
+      </GlassContainer>
 
       <WorkflowGraph :graph="graph" />
 
-      <section class="card glass-panel" aria-labelledby="workflow-nodes">
+      <GlassContainer as="section" class="card" aria-labelledby="workflow-nodes">
         <h2 id="workflow-nodes">节点状态</h2>
         <div v-if="nodes.length" class="table-wrap">
           <table>
@@ -133,12 +133,13 @@
           </table>
         </div>
         <div v-else class="empty">暂无节点</div>
-      </section>
+      </GlassContainer>
     </template>
   </div>
 </template>
 
 <script setup>
+import GlassContainer from "@/components/GlassContainer.vue";
 import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { useRoute } from "vue-router";
 import { api } from "@/api";

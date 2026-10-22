@@ -9,6 +9,7 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   scrollbar-gutter: stable;
+  overflow-x: clip;
   -webkit-font-smoothing: antialiased;
   --ink: #1d1d1f;
   --muted: #63636a;
@@ -47,6 +48,7 @@ dd {
 body {
   min-width: 0;
   font-size: var(--text-body);
+  overflow-x: clip;
 }
 a {
   color: inherit;
@@ -134,7 +136,7 @@ textarea {
   clip-path: inset(0 0 72px 0);
   pointer-events: none;
   z-index: -1;
-  opacity: 0.86;
+  opacity: 1;
 }
 .liquid-nav a {
   display: flex;
@@ -177,26 +179,25 @@ textarea {
   border-radius: 999px;
   overflow: visible;
   background: #ffffffb8;
-  box-shadow: 0 2px 6px #00000009;
+  box-shadow: none;
   color: #1d1d1f;
   font-size: var(--text-control);
-  font-weight: 500;
+  font-weight: 400;
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
 }
 .glass-button.accent {
-  background: #007aff;
+  background: #0088ff;
   color: #fff;
 }
 .glass-button canvas {
   position: absolute;
-  inset: 0;
   width: 100%;
   height: 100%;
   pointer-events: none;
-  z-index: -1;
-  opacity: 0.9;
+  z-index: 1;
+  opacity: 1;
 }
 .glass-button.ready {
   background: transparent;
@@ -204,32 +205,18 @@ textarea {
 }
 .glass-button > span {
   position: relative;
-  z-index: 1;
+  z-index: 2;
+}
+.glass-button.ready > span {
+  opacity: 0;
 }
 .glass-button:not(.ready) canvas,
 .liquid-nav:not(.ready) canvas {
   display: none;
 }
-.liquid-nav::before,
-.glass-button::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -2;
-  border-radius: inherit;
-  background: #ffffff24;
-  backdrop-filter: blur(18px) saturate(1.15);
-  pointer-events: none;
-}
-.glass-button:active:not(:disabled) {
-  filter: brightness(0.96);
-}
 .glass-button[disabled] {
   opacity: 0.45;
   cursor: wait;
-}
-.glass-button:not(.ready):hover {
-  filter: brightness(0.97);
 }
 .page-header {
   margin-bottom: var(--space-5);
@@ -283,13 +270,6 @@ h1 {
   font-size: var(--text-control);
   color: #6e6e73;
   overflow-wrap: anywhere;
-}
-.content-panel,
-.glass-panel {
-  background: #fff;
-  border: 1px solid #e5e5ea;
-  border-radius: var(--radius);
-  box-shadow: none;
 }
 .text-button,
 .back {

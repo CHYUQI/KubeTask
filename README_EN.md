@@ -84,7 +84,7 @@ The controller and HTTP server run in the same process: `cmd/main.go` starts the
 
 ### Prerequisites
 
-- Go 1.25.7 (see `go.mod`)
+- Go 1.27.3 (see `go.mod`)
 - Node.js 22.12+ and npm (for local frontend builds; the Dockerfile uses Node 22)
 - Docker (for image builds)
 - kubectl and a Kubernetes cluster (k3s recommended; tests run against envtest K8s v1.35.0)
@@ -313,12 +313,12 @@ spec:
   taskTemplates:                # named templates, reusable by multiple nodes
     go-build:
       type: OneTime             # Workflow nodes must be OneTime
-      image: golang:1.25
+      image: golang:1.27.3
       command: ["go", "build", "./..."]
       backoffLimit: 3
     go-test:
       type: OneTime
-      image: golang:1.25
+      image: golang:1.27.3
       command: ["go", "test", "./..."]
     notify:
       type: OneTime

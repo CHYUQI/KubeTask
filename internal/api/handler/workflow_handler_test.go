@@ -31,8 +31,8 @@ func workflowJSON(name string) string {
 				{ "name": "test", "dependsOn": ["build"], "template": "go-test" }
 			],
 			"taskTemplates": {
-				"go-build": { "type": "OneTime", "image": "golang:1.25", "command": ["go", "build", "./..."] },
-				"go-test": { "type": "OneTime", "image": "golang:1.25", "command": ["go", "test", "./..."] }
+				"go-build": { "type": "OneTime", "image": "golang:1.27.3", "command": ["go", "build", "./..."] },
+				"go-test": { "type": "OneTime", "image": "golang:1.27.3", "command": ["go", "test", "./..."] }
 			}
 		}
 	}`

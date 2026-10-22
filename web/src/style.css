@@ -1,5 +1,7 @@
 @import "./styles/glass.css";
 @import "./styles/dashboard.css";
 @import "./styles/pages.css";
+@import "./styles/popups.css";
 @import "./styles/select.css";
+@import "./styles/containers.css";
 @import "./styles/responsive.css";

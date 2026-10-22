@@ -84,7 +84,7 @@ Controller 与 HTTP Server 在同一进程中运行：`cmd/main.go` 启动 contr
 
 ### 环境要求
 
-- Go 1.25.7（见 `go.mod`）
+- Go 1.27.3（见 `go.mod`）
 - Node.js 22.12+ 和 npm（本地构建前端时；Dockerfile 使用 Node 22）
 - Docker（构建镜像时）
 - kubectl + 一个 Kubernetes 集群（推荐 k3s；测试环境基于 envtest K8s v1.35.0）
@@ -313,12 +313,12 @@ spec:
   taskTemplates:                # 命名模板，可被多个节点复用
     go-build:
       type: OneTime             # Workflow 节点只允许 OneTime
-      image: golang:1.25
+      image: golang:1.27.3
       command: ["go", "build", "./..."]
       backoffLimit: 3
     go-test:
       type: OneTime
-      image: golang:1.25
+      image: golang:1.27.3
       command: ["go", "test", "./..."]
     notify:
       type: OneTime

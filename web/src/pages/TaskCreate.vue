@@ -1,11 +1,11 @@
 <template>
   <div class="create-task page-compact">
     <PageHeading title="创建任务" back-to="/tasks" back-label="任务" />
-    <div v-if="error" class="error-msg">{{ error }}</div>
+    <GlassContainer v-if="error" class="error-msg">{{ error }}</GlassContainer>
     <NoCluster v-if="clusterError" :message="clusterError" />
 
     <div v-if="!clusterError" class="create-layout">
-      <form @submit.prevent="submit" class="form glass-panel">
+      <GlassContainer as="form" @submit.prevent="submit" class="form">
         <section class="form-section" aria-labelledby="task-basic-heading">
           <h2 id="task-basic-heading">基本信息</h2>
           <div class="form-row">
@@ -138,12 +138,13 @@
             :disabled="submitting"
           />
         </div>
-      </form>
+      </GlassContainer>
     </div>
   </div>
 </template>
 
 <script setup>
+import GlassContainer from "@/components/GlassContainer.vue";
 import { reactive, ref } from "vue";
 import PageHeading from "@/components/PageHeading.vue";
 import GlassButton from "@/components/GlassButton.vue";

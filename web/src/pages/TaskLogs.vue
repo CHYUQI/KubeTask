@@ -33,43 +33,43 @@
       <span v-if="searchQuery" class="match-info">
         {{ filteredLines.length }}/{{ lines.length }} 条匹配
       </span>
-      <button v-if="searchQuery" @click="searchQuery = ''" class="clear-btn">
-        清除
-      </button>
+      <GlassButton v-if="searchQuery" label="清除" @click="searchQuery = ''" />
     </div>
 
     <NoCluster v-if="clusterError" :message="clusterError" />
-    <div v-else-if="error" class="error-msg">{{ error }}</div>
+    <GlassContainer v-else-if="error" class="error-msg">{{ error }}</GlassContainer>
 
-    <div
-      v-if="!clusterError"
-      ref="logContainer"
-      class="log-container"
-      @scroll="onScroll"
-    >
-      <div v-if="!streaming && lines.length === 0" class="hint">
-        点击「开始」加载日志
-      </div>
+    <GlassContainer v-if="!clusterError" class="log-surface">
       <div
-        v-for="item in filteredLines"
-        :key="item.index"
-        class="log-line"
-        :class="lineClass(item.text)"
+        ref="logContainer"
+        class="log-container"
+        @scroll="onScroll"
       >
-        <span class="line-no">{{ item.index + 1 }}</span>
-        <span class="line-text" v-html="highlightText(item.text)"></span>
+        <div v-if="!streaming && lines.length === 0" class="hint">
+          点击「开始」加载日志
+        </div>
+        <div
+          v-for="item in filteredLines"
+          :key="item.index"
+          class="log-line"
+          :class="lineClass(item.text)"
+        >
+          <span class="line-no">{{ item.index + 1 }}</span>
+          <span class="line-text" v-html="highlightText(item.text)"></span>
+        </div>
+        <div
+          v-if="searchQuery && filteredLines.length === 0 && lines.length > 0"
+          class="hint"
+        >
+          无匹配结果
+        </div>
       </div>
-      <div
-        v-if="searchQuery && filteredLines.length === 0 && lines.length > 0"
-        class="hint"
-      >
-        无匹配结果
-      </div>
-    </div>
+    </GlassContainer>
   </div>
 </template>
 
 <script setup>
+import GlassContainer from "@/components/GlassContainer.vue";
 import { ref, computed, onUnmounted } from "vue";
 import PageHeading from "@/components/PageHeading.vue";
 import GlassButton from "@/components/GlassButton.vue";
@@ -92,6 +92,7 @@ const logContainer = ref(null);
 const autoScroll = ref(true);
 
 let streamController = null;
+let scrollFrame = 0;
 
 const filteredLines = computed(() => {
   if (!searchQuery.value)
@@ -165,8 +166,12 @@ function stopStream() {
 }
 
 function scrollBottom() {
-  const el = logContainer.value;
-  if (el) el.scrollTop = el.scrollHeight;
+  if (scrollFrame) return;
+  scrollFrame = requestAnimationFrame(() => {
+    scrollFrame = 0;
+    const el = logContainer.value;
+    if (el && autoScroll.value) el.scrollTop = el.scrollHeight;
+  });
 }
 
 function onScroll() {
@@ -187,5 +192,8 @@ function lineClass(line) {
   return "";
 }
 
-onUnmounted(() => stopStream());
+onUnmounted(() => {
+  stopStream();
+  cancelAnimationFrame(scrollFrame);
+});
 </script>

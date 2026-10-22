@@ -1,24 +1,22 @@
 <template>
-  <section class="workflow-graph glass-panel" aria-labelledby="dag-heading">
+  <GlassContainer as="section" class="workflow-graph" aria-labelledby="dag-heading">
     <div class="graph-header">
       <h2 id="dag-heading">依赖图</h2>
       <div class="zoom-controls" aria-label="图形缩放">
-        <button
+        <GlassButton
+          label="−"
           :disabled="zoom <= MIN_ZOOM"
           aria-label="缩小依赖图"
           @click="changeZoom(-0.1)"
-        >
-          −
-        </button>
+        />
         <span>{{ Math.round(zoom * 100) }}%</span>
-        <button
+        <GlassButton
+          label="+"
           :disabled="zoom >= MAX_ZOOM"
           aria-label="放大依赖图"
           @click="changeZoom(0.1)"
-        >
-          +
-        </button>
-        <button @click="fitGraph">适应窗口</button>
+        />
+        <GlassButton label="适应窗口" @click="fitGraph" />
       </div>
     </div>
 
@@ -69,7 +67,7 @@
               :marker-end="`url(#${arrowId})`"
             />
           </svg>
-          <button
+          <GlassContainer as="button"
             v-for="node in layout.nodes"
             :key="node.name"
             class="graph-node"
@@ -99,12 +97,12 @@
               node.missing ? "缺失节点" : node.phase || "Pending"
             }}</span>
             <small v-if="node.runOnFailure">失败分支</small>
-          </button>
+          </GlassContainer>
         </div>
       </div>
     </div>
 
-    <div v-if="selectedNode" class="node-detail" aria-live="polite">
+    <GlassContainer v-if="selectedNode" class="node-detail" aria-live="polite">
       <h3>{{ selectedNode.name }}</h3>
       <p>
         状态：{{
@@ -128,11 +126,13 @@
           >查看节点日志</router-link
         >
       </div>
-    </div>
-  </section>
+    </GlassContainer>
+  </GlassContainer>
 </template>
 
 <script setup>
+import GlassContainer from "@/components/GlassContainer.vue";
+import GlassButton from "@/components/GlassButton.vue";
 import { ref, computed, watch, nextTick, onMounted, useId } from "vue";
 import { layoutWorkflow, NODE_WIDTH, NODE_HEIGHT } from "@/workflow/layout";
 
@@ -205,17 +205,9 @@ h2 {
   gap: 8px;
   font-size: var(--text-caption);
 }
-.zoom-controls button {
-  min-height: var(--control-height);
-  padding: 5px 12px;
-  border: 1px solid #d2d2d7;
-  border-radius: 8px;
-  background: #fff;
-  cursor: pointer;
-}
-.zoom-controls button:disabled {
-  opacity: 0.4;
-  cursor: default;
+.zoom-controls .glass-button {
+  min-width: 38px;
+  padding: 0 12px;
 }
 .legend {
   display: flex;
@@ -243,9 +235,7 @@ h2 {
 .graph-viewport {
   overflow: auto;
   height: clamp(280px, 48vh, 420px);
-  border: 1px solid #e5e5ea;
-  border-radius: 10px;
-  background-color: #f5f5f7;
+  border-radius: 24px;
 }
 .scaled-canvas {
   position: relative;
@@ -269,10 +259,7 @@ polyline {
 }
 .graph-node {
   position: absolute;
-  padding: 12px;
-  border: 1.5px solid currentColor;
-  border-radius: 12px;
-  background: #fff;
+  padding: 16px 20px;
   text-align: left;
   cursor: pointer;
   font-family: inherit;
@@ -316,13 +303,10 @@ polyline {
 }
 .missing {
   color: #d03535;
-  border-style: dashed;
 }
 .node-detail {
   margin-top: 20px;
-  padding: 16px;
-  border-radius: 10px;
-  background: #f5f5f7;
+  padding: 20px 24px;
   font-size: var(--text-control);
   overflow-wrap: anywhere;
 }

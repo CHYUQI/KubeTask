@@ -1,7 +1,7 @@
 <template>
   <div class="workflow-create page-compact">
     <PageHeading title="创建工作流" back-to="/workflows" back-label="工作流" />
-    <form class="form content-panel" @submit.prevent="submit">
+    <GlassContainer as="form" class="form" @submit.prevent="submit">
       <div class="form-section">
         <h2>基本信息</h2>
         <div class="form-row">
@@ -63,7 +63,7 @@
         </details>
       </div>
       <NoCluster v-if="clusterError" :message="clusterError" />
-      <p v-if="error" class="error-msg" role="alert">{{ error }}</p>
+      <GlassContainer as="p" v-if="error" class="error-msg" role="alert">{{ error }}</GlassContainer>
       <div class="form-actions">
         <span class="hint">创建后开始执行。</span
         ><GlassButton
@@ -73,11 +73,12 @@
           :disabled="submitting"
         />
       </div>
-    </form>
+    </GlassContainer>
   </div>
 </template>
 
 <script setup>
+import GlassContainer from "@/components/GlassContainer.vue";
 import { onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "@/api";

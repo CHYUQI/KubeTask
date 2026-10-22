@@ -25,7 +25,12 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { prepareNavigationElements } from "./navigation-material.js";
+import { createGlassOutput } from "./glass-output.js";
+import {
+  prepareNavigationElements,
+  NAVIGATION_CATALOG_HEIGHT,
+  NAVIGATION_FRAME_HEIGHT,
+} from "./navigation-material.js";
 const route = useRoute(),
   router = useRouter(),
   host = ref(null),
@@ -46,11 +51,14 @@ const selected = computed(() =>
 );
 const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
 let renderer,
+  output,
   buildBottomTabs,
   defaults,
   palette,
   observer,
   disposed = false;
+let lastWidth = 0,
+  lastHeight = 0;
 let gesture = null,
   suppressClick = false,
   tabWidth = 1;
@@ -65,9 +73,28 @@ onMounted(async () => {
     buildBottomTabs = tabs.buildBottomTabs;
     defaults = types.DEFAULT_CATALOG_STATE;
     palette = types.LIGHT_PALETTE;
+    canvas.value.getContext("webgl", {
+      alpha: true,
+      premultipliedAlpha: true,
+      antialias: false,
+      preserveDrawingBuffer: false,
+      powerPreference: "low-power",
+    });
     renderer = new core.LiquidGlassRenderer(canvas.value);
+    renderer.quickToggles.perElementFbo = true;
     renderer.backgroundColor = [245 / 255, 245 / 255, 247 / 255];
-    renderer.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    renderer.dpr = Math.min(
+      window.devicePixelRatio || 1,
+      renderer.isSoftwareRenderer ? 1.5 : 2,
+    );
+    output = createGlassOutput(renderer);
+    const render = renderer.render.bind(renderer);
+    renderer.render = () => {
+      if (!renderer?.needsRedraw) return;
+      output.begin();
+      render();
+      output.finish();
+    };
     observer = new ResizeObserver(draw);
     observer.observe(host.value);
     draw();
@@ -98,22 +125,27 @@ function draw() {
     host.value.clientHeight <= 0
   )
     return;
+  const hostWidth = host.value.clientWidth;
+  const hostHeight = host.value.clientHeight;
+  if (hostWidth === lastWidth && hostHeight === lastHeight) return;
+  lastWidth = hostWidth;
+  lastHeight = hostHeight;
   cancelPointer();
-  const scale = host.value.clientHeight / 64;
+  const scale = hostHeight / 64;
   host.value.style.padding = 4 * scale + "px";
-  const width = host.value.clientWidth / scale + 72;
+  const width = hostWidth / scale + 72;
   Object.assign(canvas.value.style, {
     left: -36 * scale + "px",
     top: -24 * scale + "px",
     width: width * scale + "px",
-    height: 208 * scale + "px",
-    clipPath: "inset(0 0 " + 96 * scale + "px 0)",
+    height: NAVIGATION_FRAME_HEIGHT * scale + "px",
+    clipPath: "none",
   });
-  renderer.resize(width, 208);
-  // Keep the original material and indicator physics, with a fixed backing.
+  renderer.resize(width, NAVIGATION_FRAME_HEIGHT);
+  // Preserve the original backing, indicator, grouping and press physics.
   const result = buildBottomTabs(
     width,
-    208,
+    NAVIGATION_CATALOG_HEIGHT,
     () => {},
     { ...defaults, selectedTab: selected.value },
     () => {},
@@ -142,7 +174,7 @@ function selectTab(animate) {
     state.fraction = state.targetFraction = selected.value;
     state.fractionVelocity = 0;
   }
-  renderer.markAllDirty();
+  renderer.markGroupDirty("tabs3");
   renderer.requestRender();
 }
 function motionChanged() {
@@ -258,6 +290,8 @@ function loseContext(event) {
 function disposeRenderer(release = true) {
   const current = renderer;
   renderer = undefined;
+  output?.dispose();
+  output = undefined;
   current?.dispose();
   if (release) current?.gl.getExtension("WEBGL_lose_context")?.loseContext();
 }

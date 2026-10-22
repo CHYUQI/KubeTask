@@ -272,10 +272,6 @@
   :root {
     --muted: #3a3a3c;
   }
-  .content-panel,
-  .glass-panel {
-    border-color: #8e8e93;
-  }
   .glass-button {
     outline: 1px solid #3a3a3c;
   }

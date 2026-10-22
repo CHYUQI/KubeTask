@@ -20,12 +20,12 @@ spec:
   taskTemplates:
     go-build:
       type: OneTime
-      image: golang:1.25
+      image: golang:1.27.3
       command: ["go", "build", "./..."]
       backoffLimit: 3
     go-test:
       type: OneTime
-      image: golang:1.25
+      image: golang:1.27.3
       command: ["go", "test", "./..."]
     notify:
       type: OneTime

@@ -1,6 +1,6 @@
 # KubeTask Web UI
 
-最后核对：2026-10-20。Vue 3 + Vite + Vue Router + ECharts + Dagre；生产静态资源由 Gin 与 REST API 在 8080 同端口提供。当前检查结果见 [项目状态](../docs/PROJECT_STATUS.md)。
+最后核对：2026-10-21。Vue 3 + Vite + Vue Router + ECharts + Dagre；生产静态资源由 Gin 与 REST API 在 8080 同端口提供。当前检查结果见 [项目状态](../docs/PROJECT_STATUS.md)。
 
 ## 开发与构建
 
@@ -48,8 +48,22 @@ Workflow 子 Task 出现在任务列表和统计中是预期行为。API 与领�
 
 ## 验证
 
-`npm test` 使用 Node 原生测试，覆盖认证与请求取消、SSE 解码和 DAG 布局；本次 16 个测试通过。构建与后端回归的最终结果统一记录在 [项目状态](../docs/PROJECT_STATUS.md)。
+`npm test` 使用 Node 原生测试，覆盖认证与请求取消、SSE 解码、DAG 布局、Workflow 创建请求、玻璃材质及表面缓存；本次 **31/31** 通过。生产构建通过，Dashboard 约 537kB 的分块提示仍保留。构建与后端回归的最终结果统一记录在 [项目状态](../docs/PROJECT_STATUS.md)。
 
 历史浏览器与集群验收见 [P2.1](../docs/P2.1_VERIFICATION.md) 和 [P2.2 前端认证](../docs/P2.2_FRONTEND_AUTH_VERIFICATION.md)。Node 单测与静态构建不代替浏览器或真实集群验收。
 
 界面组件来源与 UX 调整见 [Liquid Glass 集成说明](LIQUID_GLASS.md)。
+
+## 界面材质与性能
+
+### 引用仓库与许可证
+
+- 上游仓库：[martin65536/liquid-glass-webgl](https://github.com/martin65536/liquid-glass-webgl)，参考演示：[Liquid Glass WebGL](https://glass.mt512.qzz.io/)。
+- 固定源码版本：[`0b90f9fc1cea8c7e59825f9aff1cbb96674b5b80`](https://github.com/martin65536/liquid-glass-webgl/tree/0b90f9fc1cea8c7e59825f9aff1cbb96674b5b80)。来源与许可保存在 [vendor 目录](src/vendor/liquid-glass-webgl/)，上游许可证为 **AGPL-3.0**，分发副本见 [LICENSE](public/third-party/liquid-glass-webgl/LICENSE)。
+- 复用范围：上游 WebGL 渲染器、导航、按钮与 Scroll Container 卡片材质。Vue 语义 DOM、业务页面、弹层定位及选择交互由本项目适配；并非直接运行上游 React 组件。
+
+导航、按钮及内容卡片复用固定版本的 `liquid-glass-webgl` 源码。表单、表格外框、详情、DAG 节点、日志、状态提示与弹出菜单统一通过 `GlassContainer` 显示上游卡片材质，文字和交互保持语义 DOM。下拉选择使用轻量 Vue 组件，支持方向键、Home/End、输入查找、Enter/Space、Escape 与 Tab；未引入 Reka UI、React 或其他 UI 框架，也未添加渐变和宣传标语。
+
+静态材质按尺寸复用，离屏延迟绘制，缓存最多约 400 万像素（仅缓存 RGBA 位图约 16MB，不代表应用总内存）。大容器降低材质分辨率，文字与图表保持各自分辨率；空闲时收缩绘制缓冲区。按钮仅复制变化的画面，日志滚动按帧合并。未测量 FPS，不把这些措施等同于具体帧率收益。
+
+透明输出以纯色页面背景为采样来源，不会抓取并折射任意底层 HTML。上游版本、许可、实现细节及浏览器验证见 [当前集成记录](LIQUID_GLASS.md#shared-glass-surfaces-and-performance-2026-10-21)。

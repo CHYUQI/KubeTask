@@ -151,12 +151,12 @@ func newWorkflow(name string) *kubetaskv1.Workflow {
 			TaskTemplates: map[string]kubetaskv1.TaskSpec{
 				"go-build": {
 					Type:    kubetaskv1.TaskTypeOneTime,
-					Image:   "golang:1.25",
+					Image:   "golang:1.27.3",
 					Command: []string{"go", "build", "./..."},
 				},
 				"go-test": {
 					Type:    kubetaskv1.TaskTypeOneTime,
-					Image:   "golang:1.25",
+					Image:   "golang:1.27.3",
 					Command: []string{"go", "test", "./..."},
 				},
 			},
@@ -222,7 +222,7 @@ var _ = Describe("Workflow Controller", func() {
 			Expect(child.Labels).To(HaveKeyWithValue(workflowNodeLabel, "build"))
 
 			Expect(child.Spec.Type).To(Equal(kubetaskv1.TaskTypeOneTime))
-			Expect(child.Spec.Image).To(Equal("golang:1.25"))
+			Expect(child.Spec.Image).To(Equal("golang:1.27.3"))
 			Expect(child.Spec.Command).To(Equal([]string{"go", "build", "./..."}))
 			Expect(child.Spec.Schedule).To(BeEmpty())
 			Expect(child.Spec.Delay).To(BeNil())
