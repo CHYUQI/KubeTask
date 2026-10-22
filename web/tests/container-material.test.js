@@ -20,19 +20,22 @@ before(async () => {
   );
   source = buildScrollContainer(400, () => {}, 1, DEFAULT_CATALOG_STATE, LIGHT_PALETTE)
     .elements.find((element) => element.id === "sc-card-0");
+
 });
 after(async () => { await server?.close(); });
 
-test("dashboard panels retain the original Scroll Container material and corners", () => {
+test("container geometry adaptation preserves the supplied upstream material", () => {
   const original = structuredClone(source);
   const cell = { ...containerFrame(source, 740, 390), x: 0, y: 0 };
   const panel = configureContainer(source, "trend", cell, { width: 740, height: 390 });
   for (const key of [
     "kind", "cornerRadius", "refractionHeight", "refractionAmount", "blurRadius",
     "saturation", "surfaceColor", "highlight", "outerShadow", "isInteractive",
-    "independentBackdrop", "depthEffect",
+    "independentBackdrop", "depthEffect", "innerShadow", "chromaticAberration",
   ]) assert.deepEqual(panel[key], source[key]);
   assert.equal(panel.cornerRadius, 32);
+  assert.equal(panel.innerShadow, null);
+  assert.equal(panel.isBottomTabIndicator, undefined);
   assert.equal(panel.blurRadius, 0);
   assert.equal(panel.isInteractive, false);
   assert.equal(panel.scroll, false);

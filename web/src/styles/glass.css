@@ -157,10 +157,10 @@ textarea {
   background: #e9e9ec;
 }
 .liquid-nav.ready a {
-  color: #3a3a3c;
+  color: transparent;
 }
 .liquid-nav.ready a.selected {
-  color: #007aff;
+  color: transparent;
   font-weight: 600;
 }
 .liquid-nav a:focus-visible {

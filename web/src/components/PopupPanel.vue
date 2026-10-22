@@ -5,14 +5,14 @@
       :id="id"
       ref="panel"
       class="ui-popup"
-      :class="panelClass"
+      :class="[panelClass, { 'is-scrollable': scrollable }]"
       :style="position"
       :role="role"
       :aria-label="label"
       tabindex="-1"
       @keydown.esc.stop.prevent="emit('dismiss')"
     >
-      <div ref="content" class="popup-content"><slot /></div>
+      <div ref="content" class="popup-content"><div ref="body"><slot /></div></div>
     </GlassContainer>
   </Teleport>
 </template>
@@ -34,8 +34,9 @@ const props = defineProps({
   align: { type: String, default: "end" },
 });
 const emit = defineEmits(["dismiss"]);
-const panel = ref(null), content = ref(null);
+const panel = ref(null), content = ref(null), body = ref(null);
 const position = ref({ visibility: "hidden" });
+const scrollable = ref(false);
 let observer, frame = 0;
 const anchorNode = () => props.anchor?.$el || props.anchor;
 const panelNode = () => panel.value?.$el;
@@ -43,18 +44,22 @@ const panelNode = () => panel.value?.$el;
 function place() {
   frame = 0;
   const anchor = anchorNode(), element = panelNode();
-  if (!props.open || !element || !anchor || !content.value) return;
+  if (!props.open || !element || !anchor || !content.value || !body.value) return;
   const rect = anchor.getBoundingClientRect();
   const width = document.documentElement.clientWidth;
   const height = window.visualViewport?.height || window.innerHeight;
   const popupWidth = props.matchWidth ? Math.min(rect.width, width - 24) : null;
   if (popupWidth !== null) element.style.width = popupWidth + "px";
-  // Measure content, never the decorative canvas and its shadow overscan.
-  const naturalHeight = content.value.scrollHeight;
+  // Absolute button canvases include shadow overscan in scrollHeight. Use
+  // normal-flow body height so shadows cannot create a scrollbar and clip themselves.
+  const padding = getComputedStyle(content.value);
+  const naturalHeight = body.value.offsetHeight +
+    parseFloat(padding.paddingTop) + parseFloat(padding.paddingBottom);
   const below = height - rect.bottom - 16, above = rect.top - 16;
   const upwards = naturalHeight > below && above > below;
   const maxHeight = Math.max(0, upwards ? above : below);
   const panelHeight = Math.min(naturalHeight, maxHeight);
+  scrollable.value = naturalHeight > maxHeight + 1;
   const panelWidth = element.offsetWidth;
   const preferredLeft = props.align === "start" ? rect.left : rect.right - panelWidth;
   position.value = {
@@ -112,7 +117,7 @@ watch(() => props.open, async (open, _previous, onCleanup) => {
   window.addEventListener("scroll", schedule, true);
   window.visualViewport?.addEventListener("resize", schedule);
   observer = new ResizeObserver(schedule);
-  observer.observe(content.value);
+  observer.observe(body.value);
   if (anchorNode()) observer.observe(anchorNode());
 }, { immediate: true });
 onUnmounted(stop);

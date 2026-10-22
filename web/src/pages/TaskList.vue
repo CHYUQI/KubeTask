@@ -189,6 +189,7 @@ onMounted(() => fetchTasks(1));
 async function fetchTasks(p) {
   loading.value = true;
   error.value = "";
+  clusterError.value = "";
   try {
     const params = { page: p, pageSize: PAGE_SIZE };
     if (filterType.value) params.type = filterType.value;

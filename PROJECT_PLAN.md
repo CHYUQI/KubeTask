@@ -79,7 +79,7 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 - [x] Workflow 创建、列表、详情（含 DAG）与异步删除
 
 #### P1.4 Web 管理界面
-- [x] Vue 3 + Vite + ECharts，仪表盘、Task 列表/创建/详情、日志面板
+- [x] Vue 3 + Vite + 原生 SVG 图表，仪表盘、Task 列表/创建/详情、日志面板
 - [x] 任务 YAML 预览、执行历史、触发/暂停/恢复/删除
 - [x] Workflow 列表/详情与 Dagre 自动布局、状态着色和节点跳转
 - [ ] Task 编辑表单（当前更新 spec 使用 PUT API）
@@ -320,7 +320,7 @@ flowchart LR
 | ORM | 未接入；GORM 为规划选型 | 当前 go.mod 没有 GORM |
 | 数据库 | 未接入；PostgreSQL 为规划选型 | 当前资源通过 Kubernetes 持久化 |
 | 前端 | Vue 3 + Vite + Dagre | SVG DAG 自动布局，无 Vue Flow 依赖 |
-| 图表 | ECharts 6 | 仪表盘状态分布与趋势 |
+| 图表 | 原生 SVG | 仪表盘类型分布与趋势，无额外图表依赖 |
 | 日志 | Zap | 高性能结构化日志 |
 | 指标 | Prometheus Client | 云原生标准 |
 | 部署 | Helm v3 | K8s 标准包管理 |
@@ -453,7 +453,7 @@ Manager 在默认 `:8081` 提供 `/healthz`、`/readyz`；业务端口 `:8080` �
 | Watch 与执行状态 | 依赖 controller-runtime 与 Job 条件同步；envtest 不运行真实 Job/Pod 控制器，需真实集群补充 |
 | 任务耗时 | activeDeadlineSeconds 已传给 Job；超时通知尚未实现 |
 | 历史与日志保留 | Task 仅留最近 10 条摘要；TTL 清理 Job/Pod 后无法继续读取其日志，尚无外部归档 |
-| 前端体积 | Dashboard 构建 chunk 超过 500 kB；可后续按 ECharts 使用范围优化加载 |
+| 前端体积 | 2026-10-22 已移除 ECharts，Dashboard 约 8.6kB；剩余较大模块为原版 WebGL 渲染器，按需加载 |
 | 尚未实现的特性 | 多集群、数据库、预测调度需各自设计与验收，当前不声明可靠性结论 |
 
 ---

@@ -87,7 +87,7 @@ onMounted(async () => {
       window.devicePixelRatio || 1,
       renderer.isSoftwareRenderer ? 1.5 : 2,
     );
-    output = createGlassOutput(renderer);
+    output = createGlassOutput(renderer, { mirrorText: true });
     const render = renderer.render.bind(renderer);
     renderer.render = () => {
       if (!renderer?.needsRedraw) return;
@@ -152,10 +152,14 @@ function draw() {
     { current: renderer },
     palette,
   );
-  const elements = prepareNavigationElements(result.elements);
+  const fontSize = parseFloat(getComputedStyle(host.value.querySelector("a")).fontSize) / scale;
+  const elements = prepareNavigationElements(result.elements, items.map(item => item.label), fontSize);
   tabWidth = elements.find((element) => element.isBottomTabIndicator)
     .isBottomTabIndicator.dragWidth;
   renderer.setElements(elements);
+  // The original catalog schedules a second entry frame so the indicator
+  // samples a settled glass-layer snapshot and populated label textures.
+  renderer.pendingExtraRenders = 1;
   selectTab(false);
   renderer.render();
   ready.value = true;

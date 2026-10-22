@@ -35,7 +35,7 @@ KubeTask 用自定义资源（CRD）描述任务与工作流：`Task` 由 Contro
   - 9 类稳定校验错误码（任务为空、重名、自依赖、未知依赖、重复依赖、模板缺失等），供 API 返回 `reason`、Controller 写入 `status.message`
   - 单元测试覆盖校验规则、拓扑序、分层结果与子 Task 命名
 - **REST API**：任务 CRUD、手动触发、暂停/恢复、统计、趋势、SSE 实时日志
-- **Web UI（与后端同镜像）**：Vue 3 + Vite + ECharts，提供仪表盘、任务管理、实时日志及工作流列表/详情；Dagre 自动布局 DAG，支持状态着色、缩放、节点详情和子 Task/日志跳转；前端产物由 Dockerfile 自动构建，无需单独部署
+- **Web UI（与后端同镜像）**：Vue 3 + Vite + 原生 SVG 图表，提供仪表盘、任务管理、实时日志及工作流列表/详情；Dagre 自动布局 DAG，支持状态着色、缩放、节点详情和子 Task/日志跳转；前端产物由 Dockerfile 自动构建，无需单独部署
 - **SSE 流式日志**：通过 Kubernetes API 实时读取 Job Pod 日志，支持 `tail`、`sinceSeconds`、`follow`
 - **配置管理**：环境变量 > YAML > 默认值（Viper，`KUBETASK_` 前缀），认证项额外支持显式 Flag 覆盖
 - **可选身份认证**：ServiceAccount TokenReview + Bearer 请求头，Web UI 在内存中设置/清除 Token，兼容普通 API 和 fetch SSE；资源授权待实现
@@ -49,7 +49,7 @@ KubeTask 用自定义资源（CRD）描述任务与工作流：`Task` 由 Contro
 ```mermaid
 flowchart LR
     subgraph 用户层
-        UI[Web UI<br/>Vue 3 + ECharts]
+        UI[Web UI<br/>Vue 3 + SVG]
         API[REST API<br/>Gin]
         CLI[kubectl / CR]
     end
@@ -407,7 +407,7 @@ kubetask/
 │   ├── api/                        # Gin 路由 + Handler（CRUD / 日志 / 统计）+ Web UI 静态托管
 │   └── testutil/                   # Windows 下 envtest 进程清理
 ├── docs/API.md                     # HTTP API 文档
-├── web/                            # Vue 3 + Vite + ECharts 前端
+├── web/                            # Vue 3 + Vite + 原生 SVG 图表 前端
 ├── charts/kubetask/                # Helm Chart
 ├── deploy/k3s/                     # k3s 一键部署脚本
 ├── config/                         # Kustomize / CRD / RBAC 清单

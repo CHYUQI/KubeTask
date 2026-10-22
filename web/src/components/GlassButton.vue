@@ -25,6 +25,7 @@
 import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { RouterLink } from "vue-router";
 import { registerButtonSurface } from "./button-surfaces.js";
+import { buttonPointerPosition } from "./button-material.js";
 const props = defineProps({
   label: { type: String, required: true },
   tone: { type: String, default: "neutral" },
@@ -93,8 +94,7 @@ function backgroundColor(element) {
   return [245 / 255, 245 / 255, 247 / 255];
 }
 function position(event) {
-  const bounds = node().getBoundingClientRect();
-  return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+  return buttonPointerPosition(node().getBoundingClientRect(), event);
 }
 function pointerDown(event) {
   if (

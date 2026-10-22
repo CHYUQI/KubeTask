@@ -39,7 +39,7 @@ kubetask/
 │   ├── rbac/role.yaml                  ← RBAC ClusterRole (自动生成, DO NOT EDIT)
 │   └── ...
 ├── bin/k8s/                            ← envtest 二进制 (etcd, kube-apiserver, kubectl)
-├── web/                                ← Vue 3 + Vite + ECharts + Dagre
+├── web/                                ← Vue 3 + Vite + SVG + Dagre
 │   ├── src/api/{index,auth,http,logs}.js ← HTTP 客户端、内存 Token、fetch SSE
 │   ├── src/pages/                      ← 仪表盘、Task、Workflow、日志
 │   └── tests/                          ← Node 原生测试（认证 + DAG 布局）
@@ -72,7 +72,7 @@ kubetask/
 - controller-runtime v0.23.3
 - K8s API v0.35.0 (envtest K8s v1.35.0)
 - Gin v1.12.0, Viper v1.21.0, Zap v1.27.0, robfig/cron v3.0.1
-- 前端声明：Vue ^3.5.39、Vue Router ^4.6.4、Vite ^8.1.1、ECharts ^6.1.0、Dagre 3.1.1；实际安装版本以 `web/package-lock.json` 为准。
+- 前端声明：Vue ^3.5.39、Vue Router ^4.6.4、Vite ^8.1.1、Dagre 3.1.1；实际安装版本以 `web/package-lock.json` 为准。
 - Dockerfile 使用 Node 22 → Go 1.27.3 → Alpine 3.21；本地 Node 要满足 lockfile 中 Vite 的 engines 要求。
 
 ---

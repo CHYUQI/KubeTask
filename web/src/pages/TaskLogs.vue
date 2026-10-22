@@ -51,11 +51,12 @@
         <div
           v-for="item in filteredLines"
           :key="item.index"
+          v-memo="[item.text, searchQuery]"
           class="log-line"
-          :class="lineClass(item.text)"
+          :class="item.level"
         >
           <span class="line-no">{{ item.index + 1 }}</span>
-          <span class="line-text" v-html="highlightText(item.text)"></span>
+          <span class="line-text" v-html="highlightLog(item.text, searchPattern)"></span>
         </div>
         <div
           v-if="searchQuery && filteredLines.length === 0 && lines.length > 0"
@@ -68,6 +69,28 @@
   </div>
 </template>
 
+<script>
+function escapeHtml(text) {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+export function logSearchPattern(query) {
+  return query ? new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi") : null;
+}
+export function highlightLog(text, pattern) {
+  if (!pattern) return escapeHtml(text);
+  let html = "", cursor = 0;
+  for (const match of text.matchAll(pattern)) {
+    html += escapeHtml(text.slice(cursor, match.index)) + "<mark>" + escapeHtml(match[0]) + "</mark>";
+    cursor = match.index + match[0].length;
+  }
+  return html + escapeHtml(text.slice(cursor));
+}
+export function lineClass(line) {
+  const lower = line.toLowerCase();
+  if (lower.includes("error") || lower.includes("fail") || lower.includes("fatal")) return "level-error";
+  return lower.includes("warn") ? "level-warn" : "";
+}
+</script>
 <script setup>
 import GlassContainer from "@/components/GlassContainer.vue";
 import { ref, computed, onUnmounted } from "vue";
@@ -95,27 +118,11 @@ let streamController = null;
 let scrollFrame = 0;
 
 const filteredLines = computed(() => {
-  if (!searchQuery.value)
-    return lines.value.map((text, index) => ({ index, text }));
+  if (!searchQuery.value) return lines.value;
   const q = searchQuery.value.toLowerCase();
-  return lines.value
-    .map((text, index) => ({ index, text }))
-    .filter((item) => item.text.toLowerCase().includes(q));
+  return lines.value.filter((item) => item.text.toLowerCase().includes(q));
 });
-
-function escapeHtml(text) {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function highlightText(text) {
-  const escaped = escapeHtml(text);
-  if (!searchQuery.value) return escaped;
-  const q = searchQuery.value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return escaped.replace(new RegExp(`(${q})`, "gi"), "<mark>$1</mark>");
-}
+const searchPattern = computed(() => logSearchPattern(searchQuery.value));
 
 function toggleStream() {
   if (streaming.value) {
@@ -142,7 +149,7 @@ async function startStream() {
       signal: controller.signal,
       onMessage(text) {
         if (streamController !== controller) return;
-        lines.value.push(text);
+        lines.value.push(Object.freeze({ index: lines.value.length, text, level: lineClass(text) }));
         if (autoScroll.value) scrollBottom();
       },
     });
@@ -178,18 +185,6 @@ function onScroll() {
   if (!logContainer.value) return;
   const el = logContainer.value;
   autoScroll.value = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
-}
-
-function lineClass(line) {
-  const lower = line.toLowerCase();
-  if (
-    lower.includes("error") ||
-    lower.includes("fail") ||
-    lower.includes("fatal")
-  )
-    return "level-error";
-  if (lower.includes("warn")) return "level-warn";
-  return "";
 }
 
 onUnmounted(() => {

@@ -1,14 +1,15 @@
 // The upstream canvas includes an opaque wallpaper/background. Mirror ONLY its
 // existing shadow, material composite and foreground passes into a transparent
-// target for DOM placement. All shaders, uniforms and physics remain upstream.
-export function createGlassOutput(renderer) {
+// target for DOM placement, including navigation text when requested.
+// All shaders, uniforms and physics remain upstream.
+export function createGlassOutput(renderer, { bodyOpacity = 1, mirrorText = false } = {}) {
   const gl = renderer.gl;
   const bind = gl.bindFramebuffer.bind(gl);
   const blend = gl.blendFunc.bind(gl);
   const blendSeparate = gl.blendFuncSeparate.bind(gl);
   let framebuffer = null,
     factors = [gl.ONE, gl.ZERO, gl.ONE, gl.ZERO];
-  let mirroring = false,
+  let mirroring = false, mirroredPass,
     target;
   gl.bindFramebuffer = (kind, value) => {
     framebuffer = value;
@@ -24,19 +25,26 @@ export function createGlassOutput(renderer) {
   };
   gl.blendFuncSeparate = (...values) => {
     factors = values;
-    blendSeparate(...values);
+    if (mirroring && mirroredPass === "drawElFboComposite" && bodyOpacity < 1) {
+      // The source glass includes a sampled opaque scene. DOM containers need
+      // translucent body coverage, while shadow/highlight passes stay intact.
+      gl.blendColor(0, 0, 0, bodyOpacity);
+      blendSeparate(gl.CONSTANT_ALPHA, gl.ONE_MINUS_SRC_ALPHA,
+        gl.CONSTANT_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    } else blendSeparate(...values);
   };
   const originals = new Map();
   for (const name of [
     "renderGlassShadowPass",
     "drawElFboComposite",
     "renderGlassPostPasses",
+    ...(mirrorText ? ["renderTextElement"] : []),
   ]) {
     const original = renderer[name];
     originals.set(name, original);
     renderer[name] = function (...args) {
-      original.apply(this, args);
-      if (!target) return;
+      const result = original.apply(this, args);
+      if (!target) return result;
       const previous = framebuffer,
         previousFactors = factors.slice();
       bind(gl.FRAMEBUFFER, target.fb);
@@ -49,14 +57,22 @@ export function createGlassOutput(renderer) {
         previousFactors[3],
       );
       mirroring = true;
+      mirroredPass = name;
       try {
-        original.apply(this, args);
+        if (name === "renderTextElement") {
+          // Upstream text binds its destination explicitly. Keep it in the
+          // source scene for refraction AND mirror it for unselected labels.
+          original.call(this, args[0], args[1], args[2], target.fb);
+        } else original.apply(this, args);
       } finally {
         mirroring = false;
+        mirroredPass = undefined;
         bind(gl.FRAMEBUFFER, previous);
+        framebuffer = previous;
         blendSeparate(...previousFactors);
         factors = previousFactors;
       }
+      return result;
     };
   }
   return {

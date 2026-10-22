@@ -144,3 +144,15 @@ test("selected indicator retains the original moving and elastic transform", () 
       1.25 * indicator.isBottomTabIndicator.dragWidth,
   );
 });
+
+test("navigation labels remain in upstream foreground textures and the indicator backdrop", () => {
+  const visible = elements();
+  const indicator = visible.find(element => element.isBottomTabIndicator);
+  const labels = visible.filter(element => element.isBottomTabContent);
+  assert.deepEqual(labels.map(element => element.text.content), ["总览", "任务", "工作流"]);
+  for (const element of labels) {
+    assert.ok(indicator.isBottomTabIndicator.tabContentIds.includes(element.id));
+    assert.equal(element.text.icon, undefined);
+    assert.equal(element.text.fontSizePx, 20);
+  }
+});

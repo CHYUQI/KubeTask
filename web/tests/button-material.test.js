@@ -6,6 +6,7 @@ let server,
   buttonFrame,
   packButtonFrames,
   configureButton,
+  buttonPointerPosition,
   buildButtons,
   types,
   computeElementTransform,
@@ -16,7 +17,7 @@ before(async () => {
     server: { middlewareMode: true, hmr: false, ws: false },
     appType: "custom",
   });
-  ({ buttonFrame, packButtonFrames, configureButton } =
+  ({ buttonFrame, packButtonFrames, configureButton, buttonPointerPosition } =
     await server.ssrLoadModule("/src/components/button-material.js"));
   ({ buildButtons } = await server.ssrLoadModule(
     "/src/vendor/liquid-glass-webgl/catalog/build-buttons.ts",
@@ -133,5 +134,33 @@ test("shared button cells do not overlap or clip their own shadows", () => {
           a.y + a.height <= b.y ||
           b.y + b.height <= a.y,
       );
+  }
+});
+
+test("captured touch/pen drags outside the button keep the animated shadow inside its frame", () => {
+  const width = 96.5, height = 38;
+  const frame = { ...buttonFrame(width, height, types.DEFAULT_SHADOW), x: 0, y: 0 };
+  const element = configureButton(template(), "captured", frame, {
+    width, height, label: "更多", fontSize: 14,
+  });
+  const bounds = { left: 240, top: 100, width, height };
+  for (const start of [{ x: 0, y: height }, { x: width, y: 0 }]) {
+    for (const clientX of [-1000, 2000]) {
+      for (const clientY of [-1000, 2000]) {
+        const point = buttonPointerPosition(bounds, { clientX, clientY });
+        assert.ok(point.x >= 0 && point.x <= width && point.y >= 0 && point.y <= height);
+        for (const pressProgress of [-0.17, 0, 1, 1.25]) {
+          const transform = computeElementTransform.call({}, element, {
+            pressProgress, dragX: point.x, dragY: point.y,
+            startDragX: start.x, startDragY: start.y,
+          }, element.rect);
+          const box = shadowBboxCss(element, transform.sx, transform.sy,
+            transform.sw, transform.sh, transform.scaleX, transform.scaleY,
+            { outerShadow: true });
+          assert.ok(box.x >= 0 && box.y >= 0 &&
+            box.x + box.w <= frame.width && box.y + box.h <= frame.height);
+        }
+      }
+    }
   }
 });

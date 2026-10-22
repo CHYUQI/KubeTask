@@ -8,7 +8,7 @@ const entries = new Map();
 const cache = createSurfaceCache();
 let sequence = 0, renderer, sourceCanvas, output, template, corePromise;
 let layoutFrame = 0, running = false, dirty = false, suspended = false;
-let idleTimer, maxDpr = Math.min(window.devicePixelRatio || 1, 1.5);
+let idleTimer, maxDpr = Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio || 1, 1.5);
 
 async function initialize() {
   if (renderer || suspended) return;
@@ -32,7 +32,7 @@ async function initialize() {
   renderer.quickToggles.perElementFbo = true;
   renderer.backgroundColor = [245 / 255, 245 / 255, 247 / 255];
   maxDpr = Math.min(window.devicePixelRatio || 1, renderer.isSoftwareRenderer ? 1 : 1.5);
-  output = createGlassOutput(renderer);
+  output = createGlassOutput(renderer, { bodyOpacity: 0.22 });
   const render = renderer.render.bind(renderer);
   renderer.render = () => {
     if (!renderer?.needsRedraw) return;
@@ -190,8 +190,10 @@ function showPage() {
   suspended = false;
   schedule();
 }
-window.addEventListener("pagehide", hidePage);
-window.addEventListener("pageshow", showPage);
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", hidePage);
+  window.addEventListener("pageshow", showPage);
+}
 if (import.meta.hot) import.meta.hot.dispose(() => {
   hidePage();
   visibility?.disconnect();

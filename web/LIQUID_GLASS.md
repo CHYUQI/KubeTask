@@ -1,8 +1,14 @@
 # Liquid glass integration
 
+Current container/navigation correction: [Original container optics and navigation text, 2026-10-22](#original-container-optics-and-navigation-text-2026-10-22).
+
+Latest changes: [Bundle reduction and clipped button shadows, 2026-10-22](#bundle-reduction-and-clipped-button-shadows-2026-10-22).
+
 Current snapshot: [Shared glass surfaces and performance, 2026-10-21](#shared-glass-surfaces-and-performance-2026-10-21).
 Dated sections below retain earlier implementation and verification history;
 the current section supersedes native-select and single-atlas descriptions.
+Source organization was subsequently simplified on 2026-10-22; see
+[dependency subset provenance](src/vendor/liquid-glass-webgl/UPSTREAM.md).
 
 The UI uses a solid palette, minimal navigation, and translucent surfaces.
 No gradient backgrounds or promotional slogans are included.
@@ -292,3 +298,148 @@ proxied Kubernetes, is not part of the repository, and was stopped after QA.
 The real development preview remains on port 5173. This is browser UI and local
 regression verification, not a new real-cluster acceptance run. The original
 frontend backup and prior cache-cleanup record above are retained.
+
+## Source cleanup, 2026-10-22
+
+The vendored dependency subset now contains 80 files instead of 105. An import
+graph walk over application modules and tests (including dynamic and type
+imports) identified 25 unreachable upstream modules. Unused catalog demos,
+their entry point and helpers, and unused rendering/shape/text helpers were
+removed. Retained upstream source files, the pinned commit, both license copies,
+and the working navigation/button/container components remain unchanged.
+
+The unused Vue/Vite template SVGs were also removed. Popup, select and container
+styles now live in `src/styles/controls.css` in exactly their previous cascade
+order; rule comparison found only whitespace and added section comments.
+The other stylesheet boundaries and independent tests remain. This removes
+29 files net without introducing dependencies or changing API/UI behavior.
+
+All 31 frontend tests and the production build passed after pruning. These
+modules were already absent from the bundled dependency graph, so the cleanup
+reduces repository clutter rather than promising runtime or bundle gains. The
+Dashboard 537.08kB chunk warning remains. No new browser or cluster acceptance
+run is claimed for this source-only cleanup.
+
+## Bundle reduction and clipped button shadows, 2026-10-22
+
+### Confirmed clipping paths and fix
+
+The authentication form used `overflow: clip` inside a popup content area that
+always used `overflow: auto`. Both clipped the original button canvas overscan,
+whose animated shadow extends beyond the form's 16px padding. The form now
+allows overflow; popup content only becomes scrollable when its normal-flow
+body exceeds the available viewport height. Placement measures body height
+plus padding, rather than `scrollHeight`, so absolute shadow canvases cannot
+create a scrollbar and clip themselves. Actual overflowing menus still scroll.
+
+Touch/pen pointer capture can deliver positions far outside the DOM button.
+The original drag transform stretches with that distance, while the adapter's
+frame reserved space for motion within the button. `buttonPointerPosition`
+now clamps input to that range. A regression test checks off-center presses,
+far-outside captured positions, fractional button width and spring overshoot
+against the original shadow bounds. Source shaders, shadow configuration and
+spring physics remain unchanged; these are adapter and DOM clipping fixes.
+
+### Bundle and frontend work
+
+The dashboard's two simple charts now use responsive native SVG in
+`DashboardCharts.vue`. It retains trend values, type proportions, hover values,
+legend visibility controls and keyboard inspection (Arrow/Home/End and Escape).
+Charts no longer need canvas chart instances or redraw/disposal loops. Their
+line drawing is now direct SVG rather than ECharts' smoothed animated series.
+The surrounding cards still use the pinned upstream Liquid Glass material.
+
+ECharts, zrender and their two nested tslib packages were removed without
+replacement dependencies. The previous build log reported 729 transformed
+modules and a 537.08kB Dashboard chunk; the final build reports 143 modules and
+an **8,614-byte Dashboard chunk (3,816 bytes gzip)**. All emitted JS/CSS assets
+sum to **546,319 bytes**, or **178,433 bytes** when each is gzip-compressed for
+measurement. The previous rounded build table summed to about 1,072.78kB of
+JS/CSS, so the raw asset reduction is about **49%**. These totals exclude HTML,
+public assets and license files; they are not measured network-load or FPS gains.
+There is no remaining >500kB chunk warning. The largest module remains the
+unchanged, lazy-loaded upstream renderer (268.72kB).
+
+Further confirmed optimizations: button templates are built once per renderer
+and unchanged layout descriptions skip repacking; unmounted canvases release
+their backing store; HMR removes old page listeners and renderer resources.
+Logs retain immutable row records, use `v-memo` to skip unchanged rows, and
+compile search patterns once per query. Search matches original text before
+HTML escaping, fixing broken highlighting of `<` and `&` while keeping output
+escaped. No log record limits or dropped events were introduced. Task-list
+refresh now clears stale connection errors before retry, allowing successful
+recovery to display the list. No backend semantics changed.
+
+### Verification boundary
+
+All **37 frontend tests**, the production build and the full Windows Go
+pipeline passed; generated files have no content differences. New checks cover
+captured-pointer shadow bounds, chart empty/single/large/narrow geometry,
+proportional donut segments, SVG rendering and log escaping/severity.
+Package inspection confirms no ECharts/zrender dependency remains.
+
+Live browser and Windows UI inspection were attempted, but both automation
+entry points failed to initialize with a missing-system-path error. No current
+visual press/drag, popup scrolling, screenshot or real-cluster acceptance is
+claimed. Geometry tests and CSS/code-path verification establish the fixes above;
+the reported visual symptom still needs confirmation in a working browser.
+
+## Container translucency, 2026-10-22
+
+After the app restart the browser tool initialized successfully. The previous
+snapshot's missing-path limitation is historical. Browser checks confirmed
+chart display, keyboard value inspection and legend toggling, normal-popup
+overflow, constrained-popup scrolling (320×340), and a 320px layout without
+horizontal overflow. Button keyboard press/release and mouse drag/release
+showed no persistent shadow offset in the observed views. These checks used
+isolated read-only fixtures, without real credentials or Kubernetes writes.
+
+The user then requested visible container transparency and fewer checks.
+Upstream `sc-card-0` already uses `surfaceColor: [0,0,0,0]`, but its sampled
+scene in the DOM adapter still had opaque coverage. The transparent-output
+adapter now scales only the premultiplied body RGB/alpha to 0.22 for passive
+containers; native shadow/highlight passes and DOM text keep their coverage.
+Buttons/navigation retain their previous output. Unready container fallback
+and table headers also use translucent colors. All GlassContainer consumers
+inherit this behavior, including cards, forms, graph nodes and popup surfaces.
+
+Popups retain a stronger translucent underlay plus a local 12px backdrop blur
+for legibility; other large cards do not add backdrop filters. This is a DOM
+compositing adaptation, not an upstream shader change. Underlying HTML is
+visible through the body but is not captured/refraction-rendered by WebGL.
+
+Only the two targeted output/alpha checks and production build were run for
+this change; both passed. One page confirmation caught and corrected overly
+transparent popup text overlap. No new full Go/frontend regression was run.
+The 18080 preview remains a read-only fixture for visual review, not cluster data.
+
+## Original container optics and navigation text, 2026-10-22
+
+Compared the pinned upstream `build-scroll-container.ts`, `makeGlassShape`,
+element refraction shader and `build-bottom-tabs.ts` again. The interim custom
+rim shader and subsequent pressed-tab container adaptation are removed.
+Containers directly use `sc-card-0`: refraction height 16, amount -32,
+saturation 1.5, no blur, no inner shadow, default outer shadow and highlight.
+Only bounds and compact-control corner limits are adapted. Native refraction
+displaces backdrop texture coordinates; its deformation is not visible against
+a uniform sampled background. DOM translucency remains at 0.22 and arbitrary
+underlying HTML is still not captured or refracted. No artificial edge band
+is added to compensate for that limitation.
+
+Navigation previously cleared upstream text and placed visible DOM labels
+above the canvas, excluding the labels from optical sampling. Labels now remain
+in upstream foreground textures referenced by the indicator's CombinedBackdrop.
+Their font size follows the DOM control size, accounting for canvas scaling;
+demo icons are omitted. The transparent output also mirrors the native text
+pass so unselected labels remain visible. DOM links retain their names, keyboard
+interaction and fallback text, becoming visually transparent only when ready.
+Each geometry rebuild requests the upstream bounded entry warm-up frame to
+avoid stale indicator content after initialization/resizing.
+
+The native SVG donut keeps rounded caps, with arc lengths adjusted for caps
+and gaps. No new dependencies or continuously running container animation were
+added. Nine targeted material/output/navigation checks and the production
+build passed. Browser review confirmed normal container edges, text on initial
+load and navigation drag/release; no captured warnings/errors in that check.
+The retained 18080 preview uses read-only fixtures, not real cluster data.
+No full Go or frontend regression was repeated for this correction.

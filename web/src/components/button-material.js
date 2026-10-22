@@ -1,6 +1,15 @@
 import { computeElementTransform } from "../vendor/liquid-glass-webgl/renderer/methods-render-glass-transform.ts";
 import { shadowBboxCss } from "../vendor/liquid-glass-webgl/renderer/methods-render-glass-geometry.ts";
 
+// Touch/pen implicitly capture pointers and can report positions far outside
+// the DOM button. Keep the upstream drag transform within its allocated frame.
+export function buttonPointerPosition(bounds, point) {
+  return {
+    x: Math.max(0, Math.min(bounds.width, point.clientX - bounds.left)),
+    y: Math.max(0, Math.min(bounds.height, point.clientY - bounds.top)),
+  };
+}
+
 // Only layout and application labels are adapted here. Optical parameters,
 // shadows, foreground drawing and press physics stay in the upstream source.
 export function buttonFrame(width, height, shadow) {

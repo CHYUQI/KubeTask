@@ -80,7 +80,7 @@ th {
   font-weight: 500;
   white-space: nowrap;
   color: #6e6e73;
-  background: #fafafa;
+  background: #ffffff18;
   border-bottom: 1px solid #e5e5ea;
 }
 td {
@@ -543,7 +543,6 @@ td code {
 }
 .auth-form {
   width: 100%;
-  overflow: clip;
   display: grid;
   gap: 16px;
   padding: 16px;

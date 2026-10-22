@@ -35,7 +35,7 @@ Status (2026-10-20): P2.0 same-port packaging and P2.1 Workflow orchestration/UI
   - Nine stable validation reasons (no tasks, duplicate name, self dependency, unknown dependency, duplicate dependency, missing template, and more) for API `reason` and controller `status.message`
   - Unit tests cover validation, topological order, levels, and child Task naming
 - **REST API**: task CRUD, trigger, suspend/resume, stats, trends, and SSE streaming logs
-- **Web UI (bundled with the image)**: Vue 3 + Vite + ECharts with dashboard, task management, live logs, and workflow list/detail pages; Dagre lays out DAGs with status colors, zoom, node inspection, and child Task/log links; the Dockerfile builds the frontend automatically, so no separate deployment is needed
+- **Web UI (bundled with the image)**: Vue 3 + Vite + native SVG charts with dashboard, task management, live logs, and workflow list/detail pages; Dagre lays out DAGs with status colors, zoom, node inspection, and child Task/log links; the Dockerfile builds the frontend automatically, so no separate deployment is needed
 - **SSE streaming logs**: reads Job Pod logs in real time through the Kubernetes API with `tail`, `sinceSeconds`, and `follow` support
 - **Configuration**: environment variables > YAML > defaults (Viper, `KUBETASK_` prefix); explicit authentication flags override environment variables
 - **Optional authentication**: ServiceAccount TokenReview and Bearer headers; in-memory UI Token settings support HTTP and fetch SSE; resource authorization remains pending
@@ -49,7 +49,7 @@ Status (2026-10-20): P2.0 same-port packaging and P2.1 Workflow orchestration/UI
 ```mermaid
 flowchart LR
     subgraph User Layer
-        UI[Web UI<br/>Vue 3 + ECharts]
+        UI[Web UI<br/>Vue 3 + SVG]
         API[REST API<br/>Gin]
         CLI[kubectl / CR]
     end
@@ -407,7 +407,7 @@ kubetask/
 │   ├── api/                        # Gin router + handlers (CRUD / logs / stats) and Web UI static serving
 │   └── testutil/                   # envtest process cleanup on Windows
 ├── docs/API.md                     # HTTP API reference
-├── web/                            # Vue 3 + Vite + ECharts frontend
+├── web/                            # Vue 3 + Vite + native SVG charts frontend
 ├── charts/kubetask/                # Helm chart
 ├── deploy/k3s/                     # k3s one-click install script
 ├── config/                         # Kustomize / CRD / RBAC manifests

@@ -16,9 +16,11 @@ let sequence = 0,
   buildButtons,
   makePlainRect,
   types,
-  output;
+  output,
+  templates;
 let layoutRaf = 0,
-  closed = false;
+  closed = false,
+  lastLayout = "";
 
 async function initialize() {
   if (renderer || closed) return;
@@ -33,6 +35,11 @@ async function initialize() {
   buildButtons = buttons.buildButtons;
   makePlainRect = helpers.makePlainRect;
   types = catalogTypes;
+  templates = buildButtons(600, 600, () => {}, types.DEFAULT_CATALOG_STATE,
+    types.LIGHT_PALETTE).elements;
+  for (const template of templates)
+    template.useSeparableBlur = types.DEFAULT_CATALOG_STATE.globalSeparableBlur;
+  lastLayout = "";
   sourceCanvas = document.createElement("canvas");
   // Context attributes apply on first acquisition. Keep upstream's context
   // settings, with an alpha channel for DOM composition of its native passes.
@@ -79,9 +86,11 @@ function layout() {
       continue;
     }
     entry.description = description;
-    entry.dirty = true;
     active.push(entry);
   }
+  const layoutKey = JSON.stringify(active.map(({ id, description }) => [id, description]));
+  if (lastLayout === layoutKey) return;
+  lastLayout = layoutKey;
   const packed = packButtonFrames(
     active.map((entry) =>
       buttonFrame(
@@ -91,15 +100,9 @@ function layout() {
       ),
     ),
   );
-  const templates = buildButtons(
-    600,
-    600,
-    () => {},
-    types.DEFAULT_CATALOG_STATE,
-    types.LIGHT_PALETTE,
-  ).elements;
   const elements = [];
   active.forEach((entry, index) => {
+    entry.dirty = true;
     const cell = packed.cells[index];
     entry.cell = cell;
     const { description } = entry;
@@ -108,8 +111,6 @@ function layout() {
         element.id ===
         (description.tone === "accent" ? "btn-tinted-blue" : "btn-surface"),
     );
-    // Apply the same catalog-wide default as upstream buildCatalog.
-    template.useSeparableBlur = types.DEFAULT_CATALOG_STATE.globalSeparableBlur;
     // The catalog owns the full canvas background. Match each cell to the
     // solid surface where its DOM button lives, including the shadow margin.
     elements.push(
@@ -213,26 +214,36 @@ export function registerButtonSurface(canvas, describe, onReady) {
     dispose() {
       if (entry.pressed) renderer?.setPressed(id, false);
       entries.delete(id);
+      canvas.width = canvas.height = 0;
       scheduleLayout();
     },
   };
 }
 
 // No perpetual presentation loop: only upstream requestRender drives frames.
-if (typeof window !== "undefined") {
-  window.addEventListener("pagehide", () => {
-    closed = true;
-    cancelAnimationFrame(layoutRaf);
-    layoutRaf = 0;
-    const previous = renderer;
-    renderer = undefined;
-    output?.dispose();
-    previous?.dispose();
-    previous?.gl.getExtension("WEBGL_lose_context")?.loseContext();
-    for (const entry of entries.values()) entry.onReady(false);
-  });
-  window.addEventListener("pageshow", () => {
-    closed = false;
-    if (entries.size) initialize().catch(() => {});
-  });
+function hidePage() {
+  closed = true;
+  cancelAnimationFrame(layoutRaf);
+  layoutRaf = 0;
+  const previous = renderer;
+  renderer = undefined;
+  sourceCanvas?.removeEventListener("webglcontextlost", contextLost);
+  output?.dispose();
+  output = undefined;
+  previous?.dispose();
+  previous?.gl.getExtension("WEBGL_lose_context")?.loseContext();
+  for (const entry of entries.values()) entry.onReady(false);
 }
+function showPage() {
+  closed = false;
+  if (entries.size) initialize().catch(() => {});
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", hidePage);
+  window.addEventListener("pageshow", showPage);
+}
+if (import.meta.hot) import.meta.hot.dispose(() => {
+  hidePage();
+  window.removeEventListener("pagehide", hidePage);
+  window.removeEventListener("pageshow", showPage);
+});

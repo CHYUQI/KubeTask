@@ -1,0 +1,154 @@
+/* popups */
+/* Small Vue popups; no component framework or generated UI styles. */
+.ui-popup.liquid-container {
+  position: fixed;
+  z-index: 100;
+  min-width: min(160px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  padding: 0;
+  color: var(--ink);
+  font-size: var(--text-control);
+  line-height: 1.45;
+  outline: none;
+  backdrop-filter: blur(12px) saturate(1.5);
+  -webkit-backdrop-filter: blur(12px) saturate(1.5);
+}
+.ui-popup.liquid-container.ready {
+  /* Keep overlapping menus legible when backdrop filtering is unavailable. */
+  background: #f5f5f7b3;
+}
+.popup-content {
+  max-height: inherit;
+  overflow: visible;
+  border-radius: inherit;
+  padding: 12px;
+}
+.ui-popup.is-scrollable .popup-content { overflow: auto; }
+.auth-popover .popup-content { padding: 0; }
+.ui-menu-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 20px;
+  background: transparent;
+  color: inherit;
+  font-size: var(--text-control);
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+}
+.ui-menu-item:hover:not(:disabled),
+.ui-menu-item:focus-visible {
+  background: #00000008;
+}
+.ui-menu-item:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.ui-menu-item[data-variant="destructive"] {
+  color: #d03535;
+}
+.ui-menu-item[data-variant="destructive"]:hover:not(:disabled),
+.ui-menu-item[data-variant="destructive"]:focus-visible {
+  background: #d035351a;
+}
+.ui-menu-separator {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--line);
+}
+.auth-popover {
+  width: min(380px, calc(100vw - 24px));
+  padding: 0;
+}
+@media (pointer: coarse) {
+  .ui-menu-item { min-height: 44px; }
+}
+
+/* select */
+.select-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.select-field > label {
+  color: var(--ink);
+  font-size: var(--text-control);
+  font-weight: 500;
+  line-height: 1.4;
+}
+.select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 8px 16px;
+  color: var(--ink);
+  font-size: var(--text-control);
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+}
+.select-value {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.select-chevron, .select-check {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.select-chevron { color: var(--muted); }
+.select-option { gap: 8px; }
+.ui-popup.select-options { min-width: 0; }
+.select-option-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.select-option-copy small {
+  color: var(--muted);
+  font-size: var(--text-caption);
+  line-height: 1.4;
+}
+.select-option[data-active="true"] { background: #00000008; }
+
+/* containers */
+.liquid-container {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  border: 0;
+  border-radius: 32px;
+  background: #ffffff38;
+  box-shadow: none;
+}
+.liquid-container.ready {
+  background: transparent;
+}
+.liquid-container > canvas {
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+}
+.liquid-container:not(.ready) > canvas {
+  display: none;
+}
+@media (prefers-contrast: more) {
+  .liquid-container { outline: 1px solid #8e8e93; }
+}
