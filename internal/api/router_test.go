@@ -13,7 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	batchv1 "k8s.io/api/batch/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -21,6 +20,10 @@ import (
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
 	"kubetask.io/kubetask/internal/api/middleware"
 	"kubetask.io/kubetask/internal/auth"
+)
+
+const (
+	testBearerSecretToken = "Bearer secret-token"
 )
 
 type routerAuthenticatorFunc func(context.Context, string) (*authenticationv1.UserInfo, error)
@@ -47,9 +50,9 @@ func TestRouterAuthenticationProtectsAllAPIRoutes(t *testing.T) {
 			calls                int
 		}{
 			{name: "missing credentials", status: http.StatusUnauthorized},
-			{name: "invalid credentials", header: "Bearer secret-token", err: fmt.Errorf("private secret-token: %w", auth.ErrUnauthenticated), status: http.StatusUnauthorized, calls: 1},
-			{name: "authentication unavailable", header: "Bearer secret-token", err: fmt.Errorf("private secret-token: %w", auth.ErrAuthenticationUnavailable), status: http.StatusServiceUnavailable, calls: 1},
-			{name: "missing authenticator", header: "Bearer secret-token", missingAuthenticator: true, status: http.StatusServiceUnavailable},
+			{name: "invalid credentials", header: testBearerSecretToken, err: fmt.Errorf("private secret-token: %w", auth.ErrUnauthenticated), status: http.StatusUnauthorized, calls: 1},
+			{name: "authentication unavailable", header: testBearerSecretToken, err: fmt.Errorf("private secret-token: %w", auth.ErrAuthenticationUnavailable), status: http.StatusServiceUnavailable, calls: 1},
+			{name: "missing authenticator", header: testBearerSecretToken, missingAuthenticator: true, status: http.StatusServiceUnavailable},
 		} {
 			t.Run(route.Method+" "+route.Path+"/"+tt.name, func(t *testing.T) {
 				calls := 0
@@ -133,7 +136,7 @@ func TestRouterAuthenticationAllowsRealHandlers(t *testing.T) {
 				}
 			})
 			req := httptest.NewRequest(http.MethodGet, tt.path, nil).WithContext(requestCtx)
-			req.Header.Set("Authorization", "Bearer secret-token")
+			req.Header.Set("Authorization", testBearerSecretToken)
 			w := httptest.NewRecorder()
 			router.engine.ServeHTTP(w, req)
 			if calls != 1 || !verified || w.Code != tt.status || !strings.Contains(w.Body.String(), tt.body) {
@@ -170,7 +173,7 @@ func TestRouterAuthenticationLeavesHealthAndWebPublic(t *testing.T) {
 		t.Run(tt.path, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			// 即使附带凭据，组外请求也不应调用认证服务。
-			req.Header.Set("Authorization", "Bearer secret-token")
+			req.Header.Set("Authorization", testBearerSecretToken)
 			w := httptest.NewRecorder()
 			router.engine.ServeHTTP(w, req)
 			if w.Code != tt.status || !strings.Contains(w.Body.String(), tt.body) {
@@ -201,9 +204,9 @@ func routerFixtureClient(t *testing.T) client.Client {
 	}
 	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(
 		&kubetaskv1.Task{
-			ObjectMeta: metav1.ObjectMeta{Name: "auth-task"},
-			Spec:       kubetaskv1.TaskSpec{Type: kubetaskv1.TaskTypeOneTime, Image: "busybox"},
+			Name: "auth-task",
+			Spec: kubetaskv1.TaskSpec{Type: kubetaskv1.TaskTypeOneTime, Image: "busybox"},
 		},
-		&kubetaskv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "auth-workflow"}},
+		&kubetaskv1.Workflow{Name: "auth-workflow"},
 	).Build()
 }

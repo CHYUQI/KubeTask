@@ -12,7 +12,6 @@ import (
 	"github.com/gin-gonic/gin"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -306,6 +305,6 @@ var _ = Describe("GET /api/v1/stats/trend", func() {
 // Cleanup helper
 // ==========================================================================
 func deleteTask(name string) {
-	task := &kubetaskv1.Task{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	task := &kubetaskv1.Task{Name: name}
 	_ = k8sClient.Delete(context.Background(), task)
 }

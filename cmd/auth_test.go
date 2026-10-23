@@ -17,6 +17,11 @@ import (
 	"kubetask.io/kubetask/internal/config"
 )
 
+const (
+	testBearerToken        = "Bearer opaque-token"
+	testConfiguredAudience = "configured-audience"
+)
+
 type startupTokenReviewFunc func(
 	context.Context, *authenticationv1.TokenReview, metav1.CreateOptions,
 ) (*authenticationv1.TokenReview, error)
@@ -107,22 +112,22 @@ func TestAuthenticationMiddlewareTokenReview(t *testing.T) {
 	}{
 		{name: "missing credentials", status: http.StatusUnauthorized},
 		{
-			name: "valid token", header: "Bearer opaque-token",
+			name: "valid token", header: testBearerToken,
 			review: authenticationv1.TokenReviewStatus{
-				Authenticated: true, Audiences: []string{"configured-audience"}, User: wantUser,
+				Authenticated: true, Audiences: []string{testConfiguredAudience}, User: wantUser,
 			},
 			status: http.StatusNoContent, calls: 1, handled: true,
 		},
-		{name: "invalid token", header: "Bearer opaque-token", status: http.StatusUnauthorized, calls: 1},
+		{name: "invalid token", header: testBearerToken, status: http.StatusUnauthorized, calls: 1},
 		{
-			name: "wrong audience", header: "Bearer opaque-token",
+			name: "wrong audience", header: testBearerToken,
 			review: authenticationv1.TokenReviewStatus{
 				Authenticated: true, Audiences: []string{"other-audience"}, User: wantUser,
 			},
 			status: http.StatusUnauthorized, calls: 1,
 		},
 		{
-			name: "review failure", header: "Bearer opaque-token",
+			name: "review failure", header: testBearerToken,
 			err: errors.New("private API failure for opaque-token"), status: http.StatusServiceUnavailable, calls: 1,
 		},
 	} {
@@ -133,12 +138,12 @@ func TestAuthenticationMiddlewareTokenReview(t *testing.T) {
 			) (*authenticationv1.TokenReview, error) {
 				calls++
 				if review.Spec.Token != "opaque-token" ||
-					!reflect.DeepEqual(review.Spec.Audiences, []string{"configured-audience"}) {
+					!reflect.DeepEqual(review.Spec.Audiences, []string{testConfiguredAudience}) {
 					t.Error("startup wiring lost the original token or configured audience")
 				}
 				return &authenticationv1.TokenReview{Status: tt.review}, tt.err
 			})
-			cfg := &config.Config{AuthEnabled: true, AuthAudience: "configured-audience"}
+			cfg := &config.Config{AuthEnabled: true, AuthAudience: testConfiguredAudience}
 			handlers, err := authenticationMiddleware(cfg, reviews)
 			if err != nil {
 				t.Fatal(err)

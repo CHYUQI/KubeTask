@@ -14,6 +14,10 @@ import (
 	"kubetask.io/kubetask/internal/workflow"
 )
 
+const (
+	workflowNotFoundMessage = "workflow not found"
+)
+
 type WorkflowHandler struct {
 	client client.Client
 }
@@ -29,7 +33,7 @@ func NewWorkflowHandler(k8sClient client.Client) *WorkflowHandler {
 func (h *WorkflowHandler) Create(c *gin.Context) {
 	var wf kubetaskv1.Workflow
 	if err := c.ShouldBindJSON(&wf); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
@@ -53,12 +57,12 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 	if err := h.client.Create(c.Request.Context(), &wf); err != nil {
 		switch {
 		case errors.IsAlreadyExists(err):
-			c.JSON(http.StatusConflict, gin.H{"error": "workflow already exists"})
+			c.JSON(http.StatusConflict, gin.H{jsonKeyError: "workflow already exists"})
 		case errors.IsInvalid(err), errors.IsBadRequest(err):
 			// CRD 结构校验 / CEL 规则拒绝：直接把 API Server 的说明透出去。
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{jsonKeyError: err.Error()})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		}
 		return
 	}
@@ -84,7 +88,7 @@ func (h *WorkflowHandler) List(c *gin.Context) {
 
 	workflows := &kubetaskv1.WorkflowList{}
 	if err := h.client.List(c.Request.Context(), workflows); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
@@ -107,10 +111,10 @@ func (h *WorkflowHandler) List(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"items":    filtered[start:end],
-		"total":    total,
-		"page":     page,
-		"pageSize": pageSize,
+		"items":      filtered[start:end],
+		jsonKeyTotal: total,
+		"page":       page,
+		"pageSize":   pageSize,
 	})
 }
 
@@ -125,10 +129,10 @@ func (h *WorkflowHandler) Get(c *gin.Context) {
 	wf := &kubetaskv1.Workflow{}
 	if err := h.client.Get(c.Request.Context(), types.NamespacedName{Name: name}, wf); err != nil {
 		if errors.IsNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "workflow not found"})
+			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: workflowNotFoundMessage})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
@@ -149,23 +153,23 @@ func (h *WorkflowHandler) Delete(c *gin.Context) {
 	wf := &kubetaskv1.Workflow{}
 	if err := h.client.Get(c.Request.Context(), types.NamespacedName{Name: name}, wf); err != nil {
 		if errors.IsNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "workflow not found"})
+			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: workflowNotFoundMessage})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
 	if err := h.client.Delete(c.Request.Context(), wf); err != nil {
 		if errors.IsNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "workflow not found"})
+			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: workflowNotFoundMessage})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "workflow deleting", "workflow": wf.Name})
+	c.JSON(http.StatusOK, gin.H{jsonKeyMessage: "workflow deleting", "workflow": wf.Name})
 }
 
 // ==========================================================================
@@ -186,10 +190,9 @@ func validateWorkflowSpec(name string, spec kubetaskv1.WorkflowSpec) error {
 }
 
 func writeWorkflowValidationError(c *gin.Context, err error) {
-	var validationErr *workflow.ValidationError
-	if stdErrors.As(err, &validationErr) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Message, "reason": validationErr.Reason})
+	if validationErr, ok := stdErrors.AsType[*workflow.ValidationError](err); ok {
+		c.JSON(http.StatusBadRequest, gin.H{jsonKeyError: validationErr.Message, "reason": validationErr.Reason})
 		return
 	}
-	c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	c.JSON(http.StatusBadRequest, gin.H{jsonKeyError: err.Error()})
 }

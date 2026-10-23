@@ -15,7 +15,6 @@ import (
 	authenticationv1 "k8s.io/api/authentication/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -58,9 +57,9 @@ func TestAuthenticatedLogStreamContinuesAfterAuthenticationTimeout(t *testing.T)
 		}
 	}
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-		&kubetaskv1.Task{ObjectMeta: metav1.ObjectMeta{Name: "stream-task"}},
-		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "stream-job", Namespace: "default", Labels: map[string]string{"kubetask.io/task": "stream-task"}}},
-		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "stream-pod", Namespace: "default", Labels: map[string]string{"job-name": "stream-job"}}},
+		&kubetaskv1.Task{Name: "stream-task"},
+		&batchv1.Job{Name: "stream-job", Namespace: "default", Labels: map[string]string{"kubetask.io/task": "stream-task"}},
+		&corev1.Pod{Name: "stream-pod", Namespace: "default", Labels: map[string]string{"job-name": "stream-job"}},
 	).Build()
 	var calls atomic.Int32
 	a := routerAuthenticatorFunc(func(context.Context, string) (*authenticationv1.UserInfo, error) {

@@ -14,6 +14,15 @@ import (
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
 )
 
+const (
+	testTestNode = "test"
+)
+
+const (
+	testBuildNode    = "build"
+	testTestTemplate = "go-test"
+)
+
 var _ = Describe("Job retry status", func() {
 	DescribeTable("records only the final Job outcome",
 		func(taskType kubetaskv1.TaskType, succeeds bool) {
@@ -112,7 +121,7 @@ var _ = Describe("Job retry status", func() {
 			defer cleanupTask(name + "-failure")
 			wf := newWorkflow(name)
 			wf.Spec.Tasks = append(wf.Spec.Tasks, kubetaskv1.WorkflowTask{
-				Name: "failure", DependsOn: []string{"build"}, Template: "go-test", RunOnFailure: true,
+				Name: "failure", DependsOn: []string{testBuildNode}, Template: testTestTemplate, RunOnFailure: true,
 			})
 			createWorkflow(wf)
 			reconcileWorkflow(name, 1)
@@ -126,12 +135,12 @@ var _ = Describe("Job retry status", func() {
 			reconcileWorkflow(name, 3)
 			stored := getWorkflow(name)
 			Expect(stored.Status.Phase).To(Equal(kubetaskv1.WorkflowRunning))
-			Expect(workflowNode(stored, "build").Phase).To(Equal(kubetaskv1.NodeRunning))
-			Expect(workflowNode(stored, "test").Phase).To(Equal(kubetaskv1.NodePending))
+			Expect(workflowNode(stored, testBuildNode).Phase).To(Equal(kubetaskv1.NodeRunning))
+			Expect(workflowNode(stored, testTestNode).Phase).To(Equal(kubetaskv1.NodePending))
 			Expect(workflowNode(stored, "failure").Phase).To(Equal(kubetaskv1.NodePending))
 			Expect(listWorkflowChildren(name)).To(HaveLen(1))
 
-			next := "test"
+			next := testTestNode
 			finalPhase := kubetaskv1.WorkflowSucceeded
 			if succeeds {
 				markJobComplete(job)
@@ -147,11 +156,11 @@ var _ = Describe("Job retry status", func() {
 			stored = getWorkflow(name)
 			Expect(workflowNode(stored, next).Phase).To(Equal(kubetaskv1.NodeRunning))
 			if succeeds {
-				Expect(workflowNode(stored, "build").Phase).To(Equal(kubetaskv1.NodeSucceeded))
+				Expect(workflowNode(stored, testBuildNode).Phase).To(Equal(kubetaskv1.NodeSucceeded))
 				Expect(workflowNode(stored, "failure").Phase).To(Equal(kubetaskv1.NodeSkipped))
 			} else {
-				Expect(workflowNode(stored, "build").Phase).To(Equal(kubetaskv1.NodeFailed))
-				Expect(workflowNode(stored, "test").Phase).To(Equal(kubetaskv1.NodeSkipped))
+				Expect(workflowNode(stored, testBuildNode).Phase).To(Equal(kubetaskv1.NodeFailed))
+				Expect(workflowNode(stored, testTestNode).Phase).To(Equal(kubetaskv1.NodeSkipped))
 			}
 			reconcileUntilStable(newTestReconciler(), name+"-"+next)
 			nextJobs := listJobs(name + "-" + next)

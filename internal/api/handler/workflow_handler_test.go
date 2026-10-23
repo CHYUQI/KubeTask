@@ -15,6 +15,10 @@ import (
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
 )
 
+const (
+	testBuildNode = "build"
+)
+
 // ==========================================================================
 // Helper
 // ==========================================================================
@@ -39,15 +43,15 @@ func workflowJSON(name string) string {
 }
 
 func deleteWorkflow(name string) {
-	wf := &kubetaskv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	wf := &kubetaskv1.Workflow{Name: name}
 	_ = k8sClient.Delete(context.Background(), wf)
 }
 
 // createWorkflowDirect 绕过 HTTP 校验直接落库，用来构造"入口放行不了"的现场。
 func createWorkflowDirect(name string, spec kubetaskv1.WorkflowSpec) {
 	wf := &kubetaskv1.Workflow{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Spec:       spec,
+		Name: name,
+		Spec: spec,
 	}
 	Expect(k8sClient.Create(context.Background(), wf)).To(Succeed())
 }
@@ -70,7 +74,7 @@ var _ = Describe("POST /api/v1/workflows", func() {
 		Expect(json.Unmarshal(w.Body.Bytes(), &wf)).To(Succeed())
 		Expect(wf.Name).To(Equal("api-wf-create"))
 		Expect(wf.Spec.Tasks).To(HaveLen(2))
-		Expect(wf.Spec.Tasks[1].DependsOn).To(Equal([]string{"build"}))
+		Expect(wf.Spec.Tasks[1].DependsOn).To(Equal([]string{testBuildNode}))
 	})
 
 	It("should reject a workflow referencing an unknown template", func() {
@@ -235,19 +239,19 @@ var _ = Describe("GET /api/v1/workflows/:name", func() {
 
 		Expect(resp.Workflow.Name).To(Equal("api-wf-get"))
 		Expect(resp.Graph.Nodes).To(HaveLen(2))
-		Expect(resp.Graph.Nodes[0].Name).To(Equal("build"))
+		Expect(resp.Graph.Nodes[0].Name).To(Equal(testBuildNode))
 		Expect(resp.Graph.Nodes[0].DependsOn).To(BeEmpty())
 		Expect(resp.Graph.Nodes[0].Phase).To(Equal(string(kubetaskv1.NodePending)),
 			"没有 Controller 跑过时，节点应默认 Pending")
 		Expect(resp.Graph.Nodes[1].Name).To(Equal("test"))
-		Expect(resp.Graph.Nodes[1].DependsOn).To(Equal([]string{"build"}))
+		Expect(resp.Graph.Nodes[1].DependsOn).To(Equal([]string{testBuildNode}))
 
 		Expect(resp.Graph.Edges).To(HaveLen(1))
-		Expect(resp.Graph.Edges[0].From).To(Equal("build"))
+		Expect(resp.Graph.Edges[0].From).To(Equal(testBuildNode))
 		Expect(resp.Graph.Edges[0].To).To(Equal("test"))
 
-		Expect(resp.Graph.Order).To(Equal([]string{"build", "test"}))
-		Expect(resp.Graph.Levels).To(Equal([][]string{{"build"}, {"test"}}))
+		Expect(resp.Graph.Order).To(Equal([]string{testBuildNode, "test"}))
+		Expect(resp.Graph.Levels).To(Equal([][]string{{testBuildNode}, {"test"}}))
 	})
 
 	It("should merge node status into the graph", func() {
@@ -259,7 +263,7 @@ var _ = Describe("GET /api/v1/workflows/:name", func() {
 		now := metav1.Now()
 		wf.Status.Phase = kubetaskv1.WorkflowRunning
 		wf.Status.Nodes = []kubetaskv1.WorkflowNodeStatus{{
-			Name:      "build",
+			Name:      testBuildNode,
 			Phase:     kubetaskv1.NodeRunning,
 			TaskName:  "api-wf-get-build",
 			StartTime: &now,
@@ -288,7 +292,7 @@ var _ = Describe("GET /api/v1/workflows/:name", func() {
 
 	It("should still render the graph when the spec was edited outside the API", func() {
 		createWorkflowDirect("api-wf-broken", kubetaskv1.WorkflowSpec{
-			Tasks: []kubetaskv1.WorkflowTask{{Name: "build", Template: "missing"}},
+			Tasks: []kubetaskv1.WorkflowTask{{Name: testBuildNode, Template: "missing"}},
 		})
 
 		w := do("GET", "/api/v1/workflows/api-wf-broken", "")

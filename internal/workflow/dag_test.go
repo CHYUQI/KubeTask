@@ -10,6 +10,16 @@ import (
 	"kubetask.io/kubetask/internal/naming"
 )
 
+const (
+	testBuildNode     = "build"
+	testBuildTemplate = "go-build"
+	testDeployNode    = "deploy"
+	testE2ENode       = "e2e"
+	testGoImage       = "golang:1.27.3"
+	testTestNode      = "test"
+	testUnitNode      = "unit"
+)
+
 // requireReason 断言 err 是带指定 Reason 的 ValidationError。
 func requireReason(t *testing.T, err error, want string) {
 	t.Helper()
@@ -38,8 +48,8 @@ func TestBuildRejectsEmptyTasks(t *testing.T) {
 func TestBuildCollectsTasks(t *testing.T) {
 	spec := kubetaskv1.WorkflowSpec{
 		Tasks: []kubetaskv1.WorkflowTask{
-			{Name: "build", TaskSpec: inlineSpec()},
-			{Name: "test", TaskSpec: inlineSpec()},
+			{Name: testBuildNode, TaskSpec: inlineSpec()},
+			{Name: testTestNode, TaskSpec: inlineSpec()},
 		},
 	}
 
@@ -50,7 +60,7 @@ func TestBuildCollectsTasks(t *testing.T) {
 	if graph.Len() != 2 {
 		t.Fatalf("Len() = %d, want 2", graph.Len())
 	}
-	if _, ok := graph.Task("test"); !ok {
+	if _, ok := graph.Task(testTestNode); !ok {
 		t.Fatal(`Task("test") not found`)
 	}
 }
@@ -58,8 +68,8 @@ func TestBuildCollectsTasks(t *testing.T) {
 func TestBuildRejectsDuplicateTaskNames(t *testing.T) {
 	spec := kubetaskv1.WorkflowSpec{
 		Tasks: []kubetaskv1.WorkflowTask{
-			{Name: "build", TaskSpec: inlineSpec()},
-			{Name: "build", TaskSpec: inlineSpec()},
+			{Name: testBuildNode, TaskSpec: inlineSpec()},
+			{Name: testBuildNode, TaskSpec: inlineSpec()},
 		},
 	}
 
@@ -70,8 +80,8 @@ func TestBuildRejectsDuplicateTaskNames(t *testing.T) {
 func TestBuildRejectsEmptyDependency(t *testing.T) {
 	spec := kubetaskv1.WorkflowSpec{
 		Tasks: []kubetaskv1.WorkflowTask{
-			{Name: "build", TaskSpec: inlineSpec()},
-			{Name: "test", DependsOn: []string{""}, TaskSpec: inlineSpec()},
+			{Name: testBuildNode, TaskSpec: inlineSpec()},
+			{Name: testTestNode, DependsOn: []string{""}, TaskSpec: inlineSpec()},
 		},
 	}
 
@@ -82,7 +92,7 @@ func TestBuildRejectsEmptyDependency(t *testing.T) {
 func TestBuildRejectsSelfDependency(t *testing.T) {
 	spec := kubetaskv1.WorkflowSpec{
 		Tasks: []kubetaskv1.WorkflowTask{
-			{Name: "build", DependsOn: []string{"build"}, TaskSpec: inlineSpec()},
+			{Name: testBuildNode, DependsOn: []string{testBuildNode}, TaskSpec: inlineSpec()},
 		},
 	}
 
@@ -93,7 +103,7 @@ func TestBuildRejectsSelfDependency(t *testing.T) {
 func TestBuildRejectsUnknownDependency(t *testing.T) {
 	spec := kubetaskv1.WorkflowSpec{
 		Tasks: []kubetaskv1.WorkflowTask{
-			{Name: "test", DependsOn: []string{"build"}, TaskSpec: inlineSpec()},
+			{Name: testTestNode, DependsOn: []string{testBuildNode}, TaskSpec: inlineSpec()},
 		},
 	}
 
@@ -104,8 +114,8 @@ func TestBuildRejectsUnknownDependency(t *testing.T) {
 func TestBuildRejectsDuplicateDependency(t *testing.T) {
 	spec := kubetaskv1.WorkflowSpec{
 		Tasks: []kubetaskv1.WorkflowTask{
-			{Name: "build", TaskSpec: inlineSpec()},
-			{Name: "test", DependsOn: []string{"build", "build"}, TaskSpec: inlineSpec()},
+			{Name: testBuildNode, TaskSpec: inlineSpec()},
+			{Name: testTestNode, DependsOn: []string{testBuildNode, testBuildNode}, TaskSpec: inlineSpec()},
 		},
 	}
 
@@ -116,8 +126,8 @@ func TestBuildRejectsDuplicateDependency(t *testing.T) {
 func TestBuildFillsDependencies(t *testing.T) {
 	spec := kubetaskv1.WorkflowSpec{
 		Tasks: []kubetaskv1.WorkflowTask{
-			{Name: "build", TaskSpec: inlineSpec()},
-			{Name: "test", DependsOn: []string{"build"}, TaskSpec: inlineSpec()},
+			{Name: testBuildNode, TaskSpec: inlineSpec()},
+			{Name: testTestNode, DependsOn: []string{testBuildNode}, TaskSpec: inlineSpec()},
 		},
 	}
 
@@ -125,17 +135,17 @@ func TestBuildFillsDependencies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
-	if got := graph.Deps("test"); !reflect.DeepEqual(got, []string{"build"}) {
+	if got := graph.Deps(testTestNode); !reflect.DeepEqual(got, []string{testBuildNode}) {
 		t.Fatalf("Deps(test) = %v, want [build]", got)
 	}
-	if got := graph.Deps("build"); len(got) != 0 {
+	if got := graph.Deps(testBuildNode); len(got) != 0 {
 		t.Fatalf("Deps(build) = %v, want empty", got)
 	}
 
 	// 返回值是副本，改它不应影响 Graph 内部状态。
-	got := graph.Deps("test")
+	got := graph.Deps(testTestNode)
 	got[0] = "mutated"
-	if again := graph.Deps("test"); again[0] != "build" {
+	if again := graph.Deps(testTestNode); again[0] != testBuildNode {
 		t.Fatalf("Graph state was mutated: %v", again)
 	}
 }
@@ -143,9 +153,9 @@ func TestBuildFillsDependencies(t *testing.T) {
 func TestBuildOrdersLinearGraph(t *testing.T) {
 	spec := kubetaskv1.WorkflowSpec{
 		Tasks: []kubetaskv1.WorkflowTask{
-			{Name: "build", TaskSpec: inlineSpec()},
-			{Name: "test", DependsOn: []string{"build"}, TaskSpec: inlineSpec()},
-			{Name: "deploy", DependsOn: []string{"test"}, TaskSpec: inlineSpec()},
+			{Name: testBuildNode, TaskSpec: inlineSpec()},
+			{Name: testTestNode, DependsOn: []string{testBuildNode}, TaskSpec: inlineSpec()},
+			{Name: testDeployNode, DependsOn: []string{testTestNode}, TaskSpec: inlineSpec()},
 		},
 	}
 
@@ -153,7 +163,7 @@ func TestBuildOrdersLinearGraph(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
-	want := []string{"build", "test", "deploy"}
+	want := []string{testBuildNode, testTestNode, testDeployNode}
 	if got := graph.Order(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Order() = %v, want %v", got, want)
 	}
@@ -163,10 +173,10 @@ func TestBuildOrdersParallelGraph(t *testing.T) {
 	// build -> unit / e2e -> deploy，中间两个节点可以并行。
 	spec := kubetaskv1.WorkflowSpec{
 		Tasks: []kubetaskv1.WorkflowTask{
-			{Name: "build", TaskSpec: inlineSpec()},
-			{Name: "unit", DependsOn: []string{"build"}, TaskSpec: inlineSpec()},
-			{Name: "e2e", DependsOn: []string{"build"}, TaskSpec: inlineSpec()},
-			{Name: "deploy", DependsOn: []string{"unit", "e2e"}, TaskSpec: inlineSpec()},
+			{Name: testBuildNode, TaskSpec: inlineSpec()},
+			{Name: testUnitNode, DependsOn: []string{testBuildNode}, TaskSpec: inlineSpec()},
+			{Name: testE2ENode, DependsOn: []string{testBuildNode}, TaskSpec: inlineSpec()},
+			{Name: testDeployNode, DependsOn: []string{testUnitNode, testE2ENode}, TaskSpec: inlineSpec()},
 		},
 	}
 
@@ -175,7 +185,7 @@ func TestBuildOrdersParallelGraph(t *testing.T) {
 		t.Fatalf("Build() error = %v", err)
 	}
 	// 同一层的节点按名字排序，保证每次运行结果一致。
-	want := []string{"build", "e2e", "unit", "deploy"}
+	want := []string{testBuildNode, testE2ENode, testUnitNode, testDeployNode}
 	if got := graph.Order(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Order() = %v, want %v", got, want)
 	}
@@ -197,9 +207,9 @@ func TestBuildRejectsCycles(t *testing.T) {
 func TestBuildComputesLevelsLinearGraph(t *testing.T) {
 	spec := kubetaskv1.WorkflowSpec{
 		Tasks: []kubetaskv1.WorkflowTask{
-			{Name: "build", TaskSpec: inlineSpec()},
-			{Name: "test", DependsOn: []string{"build"}, TaskSpec: inlineSpec()},
-			{Name: "deploy", DependsOn: []string{"test"}, TaskSpec: inlineSpec()},
+			{Name: testBuildNode, TaskSpec: inlineSpec()},
+			{Name: testTestNode, DependsOn: []string{testBuildNode}, TaskSpec: inlineSpec()},
+			{Name: testDeployNode, DependsOn: []string{testTestNode}, TaskSpec: inlineSpec()},
 		},
 	}
 
@@ -207,7 +217,7 @@ func TestBuildComputesLevelsLinearGraph(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
-	want := [][]string{{"build"}, {"test"}, {"deploy"}}
+	want := [][]string{{testBuildNode}, {testTestNode}, {testDeployNode}}
 	if got := graph.Levels(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Levels() = %v, want %v", got, want)
 	}
@@ -216,10 +226,10 @@ func TestBuildComputesLevelsLinearGraph(t *testing.T) {
 func TestBuildComputesLevelsParallelGraph(t *testing.T) {
 	spec := kubetaskv1.WorkflowSpec{
 		Tasks: []kubetaskv1.WorkflowTask{
-			{Name: "build", TaskSpec: inlineSpec()},
-			{Name: "unit", DependsOn: []string{"build"}, TaskSpec: inlineSpec()},
-			{Name: "e2e", DependsOn: []string{"build"}, TaskSpec: inlineSpec()},
-			{Name: "deploy", DependsOn: []string{"unit", "e2e"}, TaskSpec: inlineSpec()},
+			{Name: testBuildNode, TaskSpec: inlineSpec()},
+			{Name: testUnitNode, DependsOn: []string{testBuildNode}, TaskSpec: inlineSpec()},
+			{Name: testE2ENode, DependsOn: []string{testBuildNode}, TaskSpec: inlineSpec()},
+			{Name: testDeployNode, DependsOn: []string{testUnitNode, testE2ENode}, TaskSpec: inlineSpec()},
 		},
 	}
 
@@ -227,7 +237,7 @@ func TestBuildComputesLevelsParallelGraph(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
-	want := [][]string{{"build"}, {"e2e", "unit"}, {"deploy"}}
+	want := [][]string{{testBuildNode}, {testE2ENode, testUnitNode}, {testDeployNode}}
 	if got := graph.Levels(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Levels() = %v, want %v", got, want)
 	}
@@ -283,7 +293,7 @@ func TestBuildRejectsTaskWithoutExecutor(t *testing.T) {
 	// template 和 taskSpec 都没设置，无法知道这个节点要执行什么。
 	spec := kubetaskv1.WorkflowSpec{
 		Tasks: []kubetaskv1.WorkflowTask{
-			{Name: "build"},
+			{Name: testBuildNode},
 		},
 	}
 
@@ -295,10 +305,10 @@ func TestBuildRejectsTaskWithBothExecutors(t *testing.T) {
 	// template 和 taskSpec 同时设置，存在二义性。
 	spec := kubetaskv1.WorkflowSpec{
 		Tasks: []kubetaskv1.WorkflowTask{
-			{Name: "build", Template: "go-build", TaskSpec: inlineSpec()},
+			{Name: testBuildNode, Template: testBuildTemplate, TaskSpec: inlineSpec()},
 		},
 		TaskTemplates: map[string]kubetaskv1.TaskSpec{
-			"go-build": {Type: kubetaskv1.TaskTypeOneTime, Image: "golang:1.27.3"},
+			testBuildTemplate: {Type: kubetaskv1.TaskTypeOneTime, Image: testGoImage},
 		},
 	}
 
@@ -309,10 +319,10 @@ func TestBuildRejectsTaskWithBothExecutors(t *testing.T) {
 func TestBuildRejectsUnknownTemplate(t *testing.T) {
 	spec := kubetaskv1.WorkflowSpec{
 		Tasks: []kubetaskv1.WorkflowTask{
-			{Name: "build", Template: "missing"},
+			{Name: testBuildNode, Template: "missing"},
 		},
 		TaskTemplates: map[string]kubetaskv1.TaskSpec{
-			"go-build": {Type: kubetaskv1.TaskTypeOneTime, Image: "golang:1.27.3"},
+			testBuildTemplate: {Type: kubetaskv1.TaskTypeOneTime, Image: testGoImage},
 		},
 	}
 
@@ -324,11 +334,11 @@ func TestBuildAcceptsTemplateReference(t *testing.T) {
 	// 同一个 Workflow 里允许模板引用和内联 taskSpec 混用。
 	spec := kubetaskv1.WorkflowSpec{
 		Tasks: []kubetaskv1.WorkflowTask{
-			{Name: "build", Template: "go-build"},
-			{Name: "test", DependsOn: []string{"build"}, TaskSpec: inlineSpec()},
+			{Name: testBuildNode, Template: testBuildTemplate},
+			{Name: testTestNode, DependsOn: []string{testBuildNode}, TaskSpec: inlineSpec()},
 		},
 		TaskTemplates: map[string]kubetaskv1.TaskSpec{
-			"go-build": {Type: kubetaskv1.TaskTypeOneTime, Image: "golang:1.27.3"},
+			testBuildTemplate: {Type: kubetaskv1.TaskTypeOneTime, Image: testGoImage},
 		},
 	}
 
@@ -339,7 +349,7 @@ func TestBuildAcceptsTemplateReference(t *testing.T) {
 	if graph.Len() != 2 {
 		t.Fatalf("Len() = %d, want 2", graph.Len())
 	}
-	if got := graph.Order(); !reflect.DeepEqual(got, []string{"build", "test"}) {
+	if got := graph.Order(); !reflect.DeepEqual(got, []string{testBuildNode, testTestNode}) {
 		t.Fatalf("Order() = %v, want [build test]", got)
 	}
 }
@@ -353,8 +363,8 @@ func TestChildTaskName(t *testing.T) {
 func TestValidateChildTaskNames(t *testing.T) {
 	graph, err := Build(kubetaskv1.WorkflowSpec{
 		Tasks: []kubetaskv1.WorkflowTask{
-			{Name: "build", TaskSpec: inlineSpec()},
-			{Name: "test", DependsOn: []string{"build"}, TaskSpec: inlineSpec()},
+			{Name: testBuildNode, TaskSpec: inlineSpec()},
+			{Name: testTestNode, DependsOn: []string{testBuildNode}, TaskSpec: inlineSpec()},
 		},
 	})
 	if err != nil {
@@ -362,7 +372,7 @@ func TestValidateChildTaskNames(t *testing.T) {
 	}
 
 	// 最长允许的 workflow 名：46 - 1 - len("build") = 40
-	limit := naming.MaxTaskNameLength - 1 - len("build")
+	limit := naming.MaxTaskNameLength - 1 - len(testBuildNode)
 
 	tests := []struct {
 		name       string

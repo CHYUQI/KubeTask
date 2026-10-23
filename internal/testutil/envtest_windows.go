@@ -27,7 +27,7 @@ func KillOrphanedEnvTestProcesses(assetDirs ...string) {
 	if err != nil {
 		return
 	}
-	defer windows.CloseHandle(snapshot)
+	defer func() { _ = windows.CloseHandle(snapshot) }()
 
 	livePIDs := make(map[uint32]struct{})
 	var envTestEntries []windows.ProcessEntry32
@@ -61,7 +61,7 @@ func killEnvTestChildren() {
 	if err != nil {
 		return
 	}
-	defer windows.CloseHandle(snapshot)
+	defer func() { _ = windows.CloseHandle(snapshot) }()
 
 	parentPID := uint32(os.Getpid())
 	var entry windows.ProcessEntry32
@@ -90,7 +90,7 @@ func terminateProcess(pid uint32) error {
 	if err != nil {
 		return err
 	}
-	defer windows.CloseHandle(handle)
+	defer func() { _ = windows.CloseHandle(handle) }()
 	return windows.TerminateProcess(handle, 1)
 }
 
@@ -99,7 +99,7 @@ func processImagePath(pid uint32) string {
 	if err != nil {
 		return ""
 	}
-	defer windows.CloseHandle(handle)
+	defer func() { _ = windows.CloseHandle(handle) }()
 
 	buf := make([]uint16, windows.MAX_PATH)
 	size := uint32(len(buf))

@@ -33,6 +33,17 @@ import (
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
 )
 
+const (
+	testNotifyNode = "notify"
+	testSecondNode = "second"
+)
+
+const (
+	testAllPackages   = "./..."
+	testBuildTemplate = "go-build"
+	testFirstNode     = "first"
+)
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -47,7 +58,7 @@ func newWorkflowReconciler() *WorkflowReconciler {
 // reconcileWorkflow 连续调用 Reconcile 若干次，模拟 controller-runtime 的重复收敛。
 func reconcileWorkflow(name string, times int) {
 	r := newWorkflowReconciler()
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: name}}
+	req := reconcile.Request{Name: name}
 	for range times {
 		_, err := r.Reconcile(ctx, req)
 		Expect(err).NotTo(HaveOccurred())
@@ -142,22 +153,22 @@ func cleanupWorkflow(name string) {
 // newWorkflow 构造 "build -> test" 的串行流程，两个节点都引用命名模板。
 func newWorkflow(name string) *kubetaskv1.Workflow {
 	return &kubetaskv1.Workflow{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Name: name,
 		Spec: kubetaskv1.WorkflowSpec{
 			Tasks: []kubetaskv1.WorkflowTask{
-				{Name: "build", Template: "go-build"},
-				{Name: "test", DependsOn: []string{"build"}, Template: "go-test"},
+				{Name: testBuildNode, Template: testBuildTemplate},
+				{Name: testTestNode, DependsOn: []string{testBuildNode}, Template: testTestTemplate},
 			},
 			TaskTemplates: map[string]kubetaskv1.TaskSpec{
-				"go-build": {
+				testBuildTemplate: {
 					Type:    kubetaskv1.TaskTypeOneTime,
 					Image:   "golang:1.27.3",
-					Command: []string{"go", "build", "./..."},
+					Command: []string{"go", testBuildNode, testAllPackages},
 				},
-				"go-test": {
+				testTestTemplate: {
 					Type:    kubetaskv1.TaskTypeOneTime,
 					Image:   "golang:1.27.3",
-					Command: []string{"go", "test", "./..."},
+					Command: []string{"go", testTestNode, testAllPackages},
 				},
 			},
 		},
@@ -202,12 +213,12 @@ var _ = Describe("Workflow Controller", func() {
 			Expect(stored.Status.StartTime).NotTo(BeNil())
 			Expect(stored.Status.Nodes).To(HaveLen(2))
 
-			build := workflowNode(stored, "build")
+			build := workflowNode(stored, testBuildNode)
 			Expect(build.Phase).To(Equal(kubetaskv1.NodeRunning))
 			Expect(build.TaskName).To(Equal(wfName + "-build"))
 			Expect(build.StartTime).NotTo(BeNil())
 
-			test := workflowNode(stored, "test")
+			test := workflowNode(stored, testTestNode)
 			Expect(test.Phase).To(Equal(kubetaskv1.NodePending))
 			Expect(getChildTask(wfName + "-test")).To(BeNil())
 		})
@@ -219,11 +230,11 @@ var _ = Describe("Workflow Controller", func() {
 			child := getChildTask(wfName + "-build")
 			Expect(child).NotTo(BeNil())
 			Expect(child.Labels).To(HaveKeyWithValue(workflowLabel, wfName))
-			Expect(child.Labels).To(HaveKeyWithValue(workflowNodeLabel, "build"))
+			Expect(child.Labels).To(HaveKeyWithValue(workflowNodeLabel, testBuildNode))
 
 			Expect(child.Spec.Type).To(Equal(kubetaskv1.TaskTypeOneTime))
 			Expect(child.Spec.Image).To(Equal("golang:1.27.3"))
-			Expect(child.Spec.Command).To(Equal([]string{"go", "build", "./..."}))
+			Expect(child.Spec.Command).To(Equal([]string{"go", testBuildNode, testAllPackages}))
 			Expect(child.Spec.Schedule).To(BeEmpty())
 			Expect(child.Spec.Delay).To(BeNil())
 			Expect(child.Spec.Suspend).To(BeNil())
@@ -241,8 +252,8 @@ var _ = Describe("Workflow Controller", func() {
 					Name: "inline",
 					TaskSpec: &kubetaskv1.TaskSpec{
 						Type:    kubetaskv1.TaskTypeOneTime,
-						Image:   "busybox",
-						Command: []string{"echo", "hello"},
+						Image:   testBusyboxImage,
+						Command: []string{testEchoCommand, testHelloArgument},
 					},
 				},
 			}
@@ -254,8 +265,8 @@ var _ = Describe("Workflow Controller", func() {
 			child := getChildTask(wfName + "-inline")
 			Expect(child).NotTo(BeNil())
 			Expect(child.Spec.Type).To(Equal(kubetaskv1.TaskTypeOneTime))
-			Expect(child.Spec.Image).To(Equal("busybox"))
-			Expect(child.Spec.Command).To(Equal([]string{"echo", "hello"}))
+			Expect(child.Spec.Image).To(Equal(testBusyboxImage))
+			Expect(child.Spec.Command).To(Equal([]string{testEchoCommand, testHelloArgument}))
 		})
 
 		It("schedules downstream nodes after dependencies succeed", func() {
@@ -266,15 +277,15 @@ var _ = Describe("Workflow Controller", func() {
 			reconcileWorkflow(wfName, 1)
 
 			stored := getWorkflow(wfName)
-			Expect(workflowNode(stored, "build").Phase).To(Equal(kubetaskv1.NodeSucceeded))
-			Expect(workflowNode(stored, "test").Phase).To(Equal(kubetaskv1.NodeRunning))
+			Expect(workflowNode(stored, testBuildNode).Phase).To(Equal(kubetaskv1.NodeSucceeded))
+			Expect(workflowNode(stored, testTestNode).Phase).To(Equal(kubetaskv1.NodeRunning))
 			Expect(getChildTask(wfName + "-test")).NotTo(BeNil())
 
 			setChildTaskPhase(wfName+"-test", kubetaskv1.TaskSucceeded)
 			reconcileWorkflow(wfName, 1)
 
 			stored = getWorkflow(wfName)
-			Expect(workflowNode(stored, "test").Phase).To(Equal(kubetaskv1.NodeSucceeded))
+			Expect(workflowNode(stored, testTestNode).Phase).To(Equal(kubetaskv1.NodeSucceeded))
 			Expect(stored.Status.Phase).To(Equal(kubetaskv1.WorkflowSucceeded))
 			Expect(stored.Status.CompletionTime).NotTo(BeNil())
 		})
@@ -298,24 +309,24 @@ var _ = Describe("Workflow Controller", func() {
 			reconcileWorkflow(wfName, 1)
 
 			stored := getWorkflow(wfName)
-			Expect(workflowNode(stored, "build").Phase).To(Equal(kubetaskv1.NodeFailed))
-			Expect(workflowNode(stored, "build").CompletionTime).NotTo(BeNil())
+			Expect(workflowNode(stored, testBuildNode).Phase).To(Equal(kubetaskv1.NodeFailed))
+			Expect(workflowNode(stored, testBuildNode).CompletionTime).NotTo(BeNil())
 
-			skipped := workflowNode(stored, "test")
+			skipped := workflowNode(stored, testTestNode)
 			Expect(skipped.Phase).To(Equal(kubetaskv1.NodeSkipped))
-			Expect(skipped.Message).To(ContainSubstring("build"))
+			Expect(skipped.Message).To(ContainSubstring(testBuildNode))
 			Expect(getChildTask(wfName + "-test")).To(BeNil())
 
 			Expect(stored.Status.Phase).To(Equal(kubetaskv1.WorkflowFailed))
-			Expect(stored.Status.Message).To(ContainSubstring("build"))
+			Expect(stored.Status.Message).To(ContainSubstring(testBuildNode))
 			Expect(stored.Status.CompletionTime).NotTo(BeNil())
 		})
 
 		It("runs a runOnFailure node when a dependency failed", func() {
 			wf := newWorkflow(wfName)
 			wf.Spec.Tasks = []kubetaskv1.WorkflowTask{
-				{Name: "build", Template: "go-build"},
-				{Name: "notify", DependsOn: []string{"build"}, RunOnFailure: true, Template: "go-test"},
+				{Name: testBuildNode, Template: testBuildTemplate},
+				{Name: testNotifyNode, DependsOn: []string{testBuildNode}, RunOnFailure: true, Template: testTestTemplate},
 			}
 
 			createWorkflow(wf)
@@ -325,15 +336,15 @@ var _ = Describe("Workflow Controller", func() {
 			reconcileWorkflow(wfName, 1)
 
 			stored := getWorkflow(wfName)
-			Expect(workflowNode(stored, "notify").Phase).To(Equal(kubetaskv1.NodeRunning))
+			Expect(workflowNode(stored, testNotifyNode).Phase).To(Equal(kubetaskv1.NodeRunning))
 			Expect(getChildTask(wfName + "-notify")).NotTo(BeNil())
 		})
 
 		It("skips a runOnFailure node when all dependencies succeeded", func() {
 			wf := newWorkflow(wfName)
 			wf.Spec.Tasks = []kubetaskv1.WorkflowTask{
-				{Name: "build", Template: "go-build"},
-				{Name: "notify", DependsOn: []string{"build"}, RunOnFailure: true, Template: "go-test"},
+				{Name: testBuildNode, Template: testBuildTemplate},
+				{Name: testNotifyNode, DependsOn: []string{testBuildNode}, RunOnFailure: true, Template: testTestTemplate},
 			}
 
 			createWorkflow(wf)
@@ -343,7 +354,7 @@ var _ = Describe("Workflow Controller", func() {
 			reconcileWorkflow(wfName, 1)
 
 			stored := getWorkflow(wfName)
-			notify := workflowNode(stored, "notify")
+			notify := workflowNode(stored, testNotifyNode)
 			Expect(notify.Phase).To(Equal(kubetaskv1.NodeSkipped))
 			Expect(notify.Message).To(Equal("all dependencies succeeded"))
 			Expect(getChildTask(wfName + "-notify")).To(BeNil())
@@ -365,16 +376,16 @@ var _ = Describe("Workflow Controller", func() {
 			wf := newWorkflow(wfName)
 			wf.Spec.MaxParallel = 1
 			wf.Spec.Tasks = []kubetaskv1.WorkflowTask{
-				{Name: "first", Template: "go-build"},
-				{Name: "second", Template: "go-build"},
+				{Name: testFirstNode, Template: testBuildTemplate},
+				{Name: testSecondNode, Template: testBuildTemplate},
 			}
 
 			createWorkflow(wf)
 			reconcileWorkflow(wfName, 1)
 
 			stored := getWorkflow(wfName)
-			Expect(workflowNode(stored, "first").Phase).To(Equal(kubetaskv1.NodeRunning))
-			Expect(workflowNode(stored, "second").Phase).To(Equal(kubetaskv1.NodePending))
+			Expect(workflowNode(stored, testFirstNode).Phase).To(Equal(kubetaskv1.NodeRunning))
+			Expect(workflowNode(stored, testSecondNode).Phase).To(Equal(kubetaskv1.NodePending))
 			Expect(listWorkflowChildren(wfName)).To(HaveLen(1))
 			Expect(getChildTask(wfName + "-first")).NotTo(BeNil())
 			Expect(getChildTask(wfName + "-second")).To(BeNil())
@@ -393,7 +404,7 @@ var _ = Describe("Workflow Controller", func() {
 
 		It("fails the workflow when a template is missing", func() {
 			wf := newWorkflow(wfName)
-			wf.Spec.Tasks = []kubetaskv1.WorkflowTask{{Name: "build", Template: "does-not-exist"}}
+			wf.Spec.Tasks = []kubetaskv1.WorkflowTask{{Name: testBuildNode, Template: "does-not-exist"}}
 
 			createWorkflow(wf)
 			reconcileWorkflow(wfName, 1)
@@ -408,8 +419,8 @@ var _ = Describe("Workflow Controller", func() {
 		It("fails the workflow on a dependency cycle", func() {
 			wf := newWorkflow(wfName)
 			wf.Spec.Tasks = []kubetaskv1.WorkflowTask{
-				{Name: "first", DependsOn: []string{"second"}, Template: "go-build"},
-				{Name: "second", DependsOn: []string{"first"}, Template: "go-build"},
+				{Name: testFirstNode, DependsOn: []string{testSecondNode}, Template: testBuildTemplate},
+				{Name: testSecondNode, DependsOn: []string{testFirstNode}, Template: testBuildTemplate},
 			}
 
 			createWorkflow(wf)
@@ -435,7 +446,7 @@ var _ = Describe("Workflow Controller", func() {
 
 		It("fails the workflow instead of creating an invalid Job name", func() {
 			wf := newWorkflow(wfName)
-			wf.Spec.Tasks = []kubetaskv1.WorkflowTask{{Name: "build", Template: "go-build"}}
+			wf.Spec.Tasks = []kubetaskv1.WorkflowTask{{Name: testBuildNode, Template: testBuildTemplate}}
 
 			createWorkflow(wf)
 			reconcileWorkflow(wfName, 1)

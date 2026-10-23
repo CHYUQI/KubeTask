@@ -18,6 +18,12 @@ import (
 	"kubetask.io/kubetask/internal/auth"
 )
 
+const (
+	testBearerToken    = "Bearer opaque-token"
+	testOpaqueToken    = "opaque-token"
+	testServiceAccount = "system:serviceaccount:team-a:ci"
+)
+
 type authenticateFunc func(context.Context, string) (*authenticationv1.UserInfo, error)
 
 func (f authenticateFunc) Authenticate(ctx context.Context, token string) (*authenticationv1.UserInfo, error) {
@@ -48,18 +54,18 @@ func TestAuthenticationHeaders(t *testing.T) {
 		{name: "newline in token", headers: []string{"Bearer opaque\ntoken"}},
 		{name: "multiple tokens", headers: []string{"Bearer opaque-token extra"}},
 		{name: "combined headers", headers: []string{"Bearer opaque-token, Bearer another-token"}},
-		{name: "duplicate headers", headers: []string{"Bearer opaque-token", "Bearer another-token"}},
-		{name: "duplicate empty header", headers: []string{"Bearer opaque-token", ""}},
+		{name: "duplicate headers", headers: []string{testBearerToken, "Bearer another-token"}},
+		{name: "duplicate empty header", headers: []string{testBearerToken, ""}},
 		{name: "unicode whitespace", headers: []string{"Bearer opaque\u00a0token"}},
 		{name: "invalid character", headers: []string{"Bearer token:secret"}},
 		{name: "misplaced padding", headers: []string{"Bearer token=secret"}},
 		{name: "padding without token", headers: []string{"Bearer ==="}},
 		{name: "query tokens ignored", target: "/protected?token=query-secret&access_token=query-secret"},
-		{name: "valid", headers: []string{"Bearer opaque-token"}, token: "opaque-token"},
-		{name: "case insensitive scheme", headers: []string{"bEaReR opaque-token"}, token: "opaque-token"},
-		{name: "multiple separator spaces", headers: []string{"Bearer   opaque-token"}, token: "opaque-token"},
+		{name: "valid", headers: []string{testBearerToken}, token: testOpaqueToken},
+		{name: "case insensitive scheme", headers: []string{"bEaReR opaque-token"}, token: testOpaqueToken},
+		{name: "multiple separator spaces", headers: []string{"Bearer   opaque-token"}, token: testOpaqueToken},
 		{name: "all allowed characters", headers: []string{"Bearer AZaz09-._~+/=="}, token: "AZaz09-._~+/=="},
-		{name: "header wins over query", headers: []string{"Bearer opaque-token"}, target: "/protected?access_token=query-secret", token: "opaque-token"},
+		{name: "header wins over query", headers: []string{testBearerToken}, target: "/protected?access_token=query-secret", token: testOpaqueToken},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			calls, handled := 0, false
@@ -68,7 +74,7 @@ func TestAuthenticationHeaders(t *testing.T) {
 				if token != tt.token {
 					t.Error("authenticator did not receive the original header token")
 				}
-				return &authenticationv1.UserInfo{Username: "system:serviceaccount:team-a:ci"}, nil
+				return &authenticationv1.UserInfo{Username: testServiceAccount}, nil
 			})
 			router := authRouter(a, func(c *gin.Context) {
 				handled = true
@@ -115,7 +121,7 @@ func TestAuthenticationErrors(t *testing.T) {
 			a := authenticateFunc(func(ctx context.Context, _ string) (*authenticationv1.UserInfo, error) {
 				authCtx = ctx
 				// 即使错误同时带有身份，也不能继续执行业务。
-				return &authenticationv1.UserInfo{Username: "system:serviceaccount:team-a:ci"}, tt.err
+				return &authenticationv1.UserInfo{Username: testServiceAccount}, tt.err
 			})
 			router := authRouter(a, func(*gin.Context) { handled = true })
 			req := bearerRequest(context.Background())
@@ -153,7 +159,7 @@ func TestAuthenticationMissingDependencyOrIdentity(t *testing.T) {
 
 func TestAuthenticationIdentityAndRequestContext(t *testing.T) {
 	want := authenticationv1.UserInfo{
-		Username: "system:serviceaccount:team-a:ci",
+		Username: testServiceAccount,
 		UID:      "account-uid",
 		Groups:   []string{"system:serviceaccounts", "system:serviceaccounts:team-a", "system:authenticated"},
 		Extra:    map[string]authenticationv1.ExtraValue{"authentication.kubernetes.io/credential-id": {"credential-id"}},
@@ -256,7 +262,7 @@ func TestAuthenticationRequestCancellation(t *testing.T) {
 					t.Error("authentication did not inherit request cancellation")
 				}
 				// 已取消的认证不能因为校验器返回成功而放行业务。
-				return &authenticationv1.UserInfo{Username: "system:serviceaccount:team-a:ci"}, nil
+				return &authenticationv1.UserInfo{Username: testServiceAccount}, nil
 			})
 			router := authRouter(a, func(*gin.Context) { t.Error("canceled authentication executed handler") })
 			w := httptest.NewRecorder()
@@ -297,7 +303,7 @@ func assertAuthRejection(t *testing.T, w *httptest.ResponseRecorder, status int)
 		t.Error("unexpected Bearer authentication challenge")
 	}
 	response := w.Body.String() + fmt.Sprint(w.Header())
-	for _, secret := range []string{"secret-token", "opaque-token", "query-secret", "internal details", "cannot review", "expired"} {
+	for _, secret := range []string{"secret-token", testOpaqueToken, "query-secret", "internal details", "cannot review", "expired"} {
 		if strings.Contains(response, secret) {
 			t.Error("authentication response leaked credentials or underlying errors")
 		}

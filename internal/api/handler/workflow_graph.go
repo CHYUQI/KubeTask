@@ -115,8 +115,7 @@ func newWorkflowGraphNode(
 
 // workflowValidationText 把校验错误转成稳定的 "Reason: Message" 文本。
 func workflowValidationText(err error) string {
-	var validationErr *workflow.ValidationError
-	if stdErrors.As(err, &validationErr) {
+	if validationErr, ok := stdErrors.AsType[*workflow.ValidationError](err); ok {
 		return fmt.Sprintf("%s: %s", validationErr.Reason, validationErr.Message)
 	}
 	return err.Error()

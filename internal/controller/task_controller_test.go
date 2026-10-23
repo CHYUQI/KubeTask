@@ -18,6 +18,17 @@ import (
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
 )
 
+const (
+	testHelloArgument = "hello"
+)
+
+const (
+	testBusyboxImage       = "busybox"
+	testBusyboxLatestImage = "busybox:latest"
+	testEchoCommand        = "echo"
+	testJobNamespace       = "default"
+)
+
 // ---------------------------------------------------------------------------
 // Helper: create a Reconciler instance backed by the envtest client
 // ---------------------------------------------------------------------------
@@ -32,7 +43,7 @@ func newTestReconciler() *TaskReconciler {
 // Helper: reconcile N times and return the last result
 // ---------------------------------------------------------------------------
 func reconcileUntilStable(r *TaskReconciler, taskName string) {
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+	req := reconcile.Request{Name: taskName}
 	for range 5 {
 		_, err := r.Reconcile(ctx, req)
 		Expect(err).NotTo(HaveOccurred())
@@ -44,7 +55,7 @@ func reconcileUntilStable(r *TaskReconciler, taskName string) {
 // ---------------------------------------------------------------------------
 func createAndInitTask(task *kubetaskv1.Task) {
 	Expect(k8sClient.Create(ctx, task)).To(Succeed())
-	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: task.Name}}
+	req := reconcile.Request{Name: task.Name}
 	r := newTestReconciler()
 	// 1st reconcile: add Finalizer → update
 	_, err := r.Reconcile(ctx, req)
@@ -88,7 +99,7 @@ var _ = Describe("Task Controller", func() {
 			createAndInitTask(task)
 
 			r := newTestReconciler()
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+			req := reconcile.Request{Name: taskName}
 			_, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -107,7 +118,7 @@ var _ = Describe("Task Controller", func() {
 			Expect(k8sClient.Status().Update(ctx, job)).To(Succeed())
 
 			r := newTestReconciler()
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+			req := reconcile.Request{Name: taskName}
 			_, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -118,7 +129,7 @@ var _ = Describe("Task Controller", func() {
 			Expect(k8sClient.Update(ctx, job)).To(Succeed())
 			_ = k8sClient.Delete(ctx, job, client.PropagationPolicy(metav1.DeletePropagationBackground))
 			Eventually(func() bool {
-				err := k8sClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: job.Name}, &batchv1.Job{})
+				err := k8sClient.Get(ctx, types.NamespacedName{Namespace: testJobNamespace, Name: job.Name}, &batchv1.Job{})
 				return apierrors.IsNotFound(err)
 			}, 5*time.Second, 100*time.Millisecond).Should(BeTrue())
 
@@ -132,7 +143,7 @@ var _ = Describe("Task Controller", func() {
 			Expect(k8sClient.Create(ctx, task)).To(Succeed())
 
 			r := newTestReconciler()
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+			req := reconcile.Request{Name: taskName}
 			_, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -162,18 +173,18 @@ var _ = Describe("Task Controller", func() {
 
 		It("should requeue when schedule is in the future", func() {
 			task := &kubetaskv1.Task{
-				ObjectMeta: metav1.ObjectMeta{Name: taskName},
+				Name: taskName,
 				Spec: kubetaskv1.TaskSpec{
 					Type:     kubetaskv1.TaskTypeCron,
-					Image:    "busybox:latest",
-					Command:  []string{"echo", "cron"},
+					Image:    testBusyboxLatestImage,
+					Command:  []string{testEchoCommand, "cron"},
 					Schedule: "0 0 1 1 *",
 				},
 			}
 			createAndInitTask(task)
 
 			r := newTestReconciler()
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+			req := reconcile.Request{Name: taskName}
 			result, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
@@ -189,7 +200,7 @@ var _ = Describe("Task Controller", func() {
 			createAndInitTask(task)
 
 			r := newTestReconciler()
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+			req := reconcile.Request{Name: taskName}
 			result, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 			// "* * * * *" fires every minute - nextTime is the next minute boundary
@@ -209,16 +220,14 @@ var _ = Describe("Task Controller", func() {
 			createAndInitTask(task)
 
 			job := &batchv1.Job{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      taskName + "-sync",
-					Namespace: "default",
-					Labels:    map[string]string{"kubetask.io/task": taskName},
-				},
+				Name:      taskName + "-sync",
+				Namespace: testJobNamespace,
+				Labels:    map[string]string{taskLabelKey: taskName},
 				Spec: batchv1.JobSpec{
 					Template: corev1.PodTemplateSpec{
 						Spec: corev1.PodSpec{
 							RestartPolicy: corev1.RestartPolicyNever,
-							Containers:    []corev1.Container{{Name: "task", Image: "busybox"}},
+							Containers:    []corev1.Container{{Name: "task", Image: testBusyboxImage}},
 						},
 					},
 				},
@@ -228,7 +237,7 @@ var _ = Describe("Task Controller", func() {
 			Expect(k8sClient.Status().Update(ctx, job)).To(Succeed())
 
 			r := newTestReconciler()
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+			req := reconcile.Request{Name: taskName}
 			result, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
@@ -253,7 +262,7 @@ var _ = Describe("Task Controller", func() {
 			createAndInitTask(task)
 
 			r := newTestReconciler()
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+			req := reconcile.Request{Name: taskName}
 			result, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
@@ -293,7 +302,7 @@ var _ = Describe("Task Controller", func() {
 			createAndInitTask(task)
 
 			r := newTestReconciler()
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+			req := reconcile.Request{Name: taskName}
 			_, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -315,7 +324,7 @@ var _ = Describe("Task Controller", func() {
 			Expect(k8sClient.Status().Update(ctx, job)).To(Succeed())
 
 			r := newTestReconciler()
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+			req := reconcile.Request{Name: taskName}
 			_, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -326,7 +335,7 @@ var _ = Describe("Task Controller", func() {
 			Expect(k8sClient.Update(ctx, job)).To(Succeed())
 			_ = k8sClient.Delete(ctx, job, client.PropagationPolicy(metav1.DeletePropagationBackground))
 			Eventually(func() bool {
-				err := k8sClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: job.Name}, &batchv1.Job{})
+				err := k8sClient.Get(ctx, types.NamespacedName{Namespace: testJobNamespace, Name: job.Name}, &batchv1.Job{})
 				return apierrors.IsNotFound(err)
 			}, 5*time.Second, 100*time.Millisecond).Should(BeTrue())
 
@@ -348,7 +357,7 @@ var _ = Describe("Task Controller", func() {
 
 		It("should set Phase=Suspended and not create Job", func() {
 			task := newOneTimeTask(taskName)
-			task.Spec.Suspend = boolPtr(true)
+			task.Spec.Suspend = new(true)
 			Expect(k8sClient.Create(ctx, task)).To(Succeed())
 
 			reconcileUntilStable(newTestReconciler(), taskName)
@@ -362,14 +371,14 @@ var _ = Describe("Task Controller", func() {
 
 		It("should reset Phase to Pending after resume", func() {
 			task := newCronTask(taskName, "0 0 1 1 *")
-			task.Spec.Suspend = boolPtr(true)
+			task.Spec.Suspend = new(true)
 			Expect(k8sClient.Create(ctx, task)).To(Succeed())
 
 			reconcileUntilStable(newTestReconciler(), taskName)
 			Expect(getTask(taskName).Status.Phase).To(Equal(kubetaskv1.TaskSuspended))
 
 			task = getTask(taskName)
-			task.Spec.Suspend = boolPtr(false)
+			task.Spec.Suspend = new(false)
 			Expect(k8sClient.Update(ctx, task)).To(Succeed())
 
 			reconcileUntilStable(newTestReconciler(), taskName)
@@ -397,7 +406,7 @@ var _ = Describe("Task Controller", func() {
 			Expect(k8sClient.Delete(ctx, task)).To(Succeed())
 
 			r := newTestReconciler()
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+			req := reconcile.Request{Name: taskName}
 
 			// First reconciliation after delete: should delete the job
 			_, err := r.Reconcile(ctx, req)
@@ -422,15 +431,15 @@ var _ = Describe("Task Controller", func() {
 	Context("constructJob", func() {
 		It("should build a valid Job from Task spec", func() {
 			task := &kubetaskv1.Task{
-				ObjectMeta: metav1.ObjectMeta{Name: "construct-test"},
+				Name: "construct-test",
 				Spec: kubetaskv1.TaskSpec{
 					Type:                    kubetaskv1.TaskTypeOneTime,
 					Image:                   "alpine:3.20",
 					Command:                 []string{"/bin/sh", "-c"},
 					Args:                    []string{"echo done"},
-					BackoffLimit:            int32Ptr(5),
-					ActiveDeadlineSeconds:   int64Ptr(300),
-					TTLSecondsAfterFinished: int32Ptr(60),
+					BackoffLimit:            new(int32(5)),
+					ActiveDeadlineSeconds:   new(int64(300)),
+					TTLSecondsAfterFinished: new(int32(60)),
 					Resources:               corev1.ResourceRequirements{},
 				},
 			}
@@ -456,10 +465,10 @@ var _ = Describe("Task Controller", func() {
 
 		It("should use default BackoffLimit when not specified", func() {
 			task := &kubetaskv1.Task{
-				ObjectMeta: metav1.ObjectMeta{Name: "default-bol"},
+				Name: "default-bol",
 				Spec: kubetaskv1.TaskSpec{
 					Type:  kubetaskv1.TaskTypeOneTime,
-					Image: "busybox",
+					Image: testBusyboxImage,
 				},
 			}
 
@@ -482,7 +491,7 @@ var _ = Describe("Task Controller", func() {
 			createAndInitTask(task)
 
 			r := newTestReconciler()
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+			req := reconcile.Request{Name: taskName}
 			_, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -505,7 +514,7 @@ var _ = Describe("Task Controller", func() {
 			Expect(k8sClient.Status().Update(ctx, job)).To(Succeed())
 
 			r := newTestReconciler()
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+			req := reconcile.Request{Name: taskName}
 			_, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -533,7 +542,7 @@ var _ = Describe("Task Controller", func() {
 			Expect(k8sClient.Status().Update(ctx, job)).To(Succeed())
 
 			r := newTestReconciler()
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+			req := reconcile.Request{Name: taskName}
 			_, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -569,7 +578,7 @@ var _ = Describe("Task Controller", func() {
 			Expect(k8sClient.Status().Update(ctx, job)).To(Succeed())
 
 			r := newTestReconciler()
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: taskName}}
+			req := reconcile.Request{Name: taskName}
 			_, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -584,7 +593,7 @@ var _ = Describe("Task Controller", func() {
 	Context("IsNotFound", func() {
 		It("should return nil without error for non-existent Task", func() {
 			r := newTestReconciler()
-			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "does-not-exist"}}
+			req := reconcile.Request{Name: "does-not-exist"}
 			result, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).To(Equal(reconcile.Result{}))
@@ -598,22 +607,22 @@ var _ = Describe("Task Controller", func() {
 
 func newOneTimeTask(name string) *kubetaskv1.Task {
 	return &kubetaskv1.Task{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Name: name,
 		Spec: kubetaskv1.TaskSpec{
 			Type:    kubetaskv1.TaskTypeOneTime,
-			Image:   "busybox:latest",
-			Command: []string{"echo", "hello"},
+			Image:   testBusyboxLatestImage,
+			Command: []string{testEchoCommand, testHelloArgument},
 		},
 	}
 }
 
 func newCronTask(name, schedule string) *kubetaskv1.Task {
 	return &kubetaskv1.Task{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Name: name,
 		Spec: kubetaskv1.TaskSpec{
 			Type:     kubetaskv1.TaskTypeCron,
-			Image:    "busybox:latest",
-			Command:  []string{"echo", "cron"},
+			Image:    testBusyboxLatestImage,
+			Command:  []string{testEchoCommand, "cron"},
 			Schedule: schedule,
 		},
 	}
@@ -622,11 +631,11 @@ func newCronTask(name, schedule string) *kubetaskv1.Task {
 func newDelayTask(name, delay string) *kubetaskv1.Task {
 	d, _ := time.ParseDuration(delay)
 	return &kubetaskv1.Task{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Name: name,
 		Spec: kubetaskv1.TaskSpec{
 			Type:    kubetaskv1.TaskTypeDelay,
-			Image:   "busybox:latest",
-			Command: []string{"echo", "delayed"},
+			Image:   testBusyboxLatestImage,
+			Command: []string{testEchoCommand, "delayed"},
 			Delay:   &metav1.Duration{Duration: d},
 		},
 	}
@@ -641,13 +650,13 @@ func getTask(name string) *kubetaskv1.Task {
 
 func listJobs(taskName string) *batchv1.JobList {
 	jobs := &batchv1.JobList{}
-	err := k8sClient.List(ctx, jobs, client.MatchingLabels{"kubetask.io/task": taskName})
+	err := k8sClient.List(ctx, jobs, client.MatchingLabels{taskLabelKey: taskName})
 	Expect(err).NotTo(HaveOccurred())
 	return jobs
 }
 
 func cleanupTask(name string) {
-	task := &kubetaskv1.Task{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	task := &kubetaskv1.Task{Name: name}
 	err := k8sClient.Get(ctx, types.NamespacedName{Name: name}, task)
 	if apierrors.IsNotFound(err) {
 		return
@@ -662,15 +671,11 @@ func cleanupTask(name string) {
 	_ = k8sClient.Delete(ctx, task)
 	// Delete orphan jobs
 	jobs := &batchv1.JobList{}
-	_ = k8sClient.List(ctx, jobs, client.MatchingLabels{"kubetask.io/task": name})
+	_ = k8sClient.List(ctx, jobs, client.MatchingLabels{taskLabelKey: name})
 	for i := range jobs.Items {
 		_ = k8sClient.Delete(ctx, &jobs.Items[i])
 	}
 }
-
-func int32Ptr(v int32) *int32 { return &v }
-func int64Ptr(v int64) *int64 { return &v }
-func boolPtr(v bool) *bool    { return &v }
 
 func markJobComplete(job *batchv1.Job) {
 	now := metav1.Now()

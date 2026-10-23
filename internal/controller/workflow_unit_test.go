@@ -28,12 +28,16 @@ import (
 	"kubetask.io/kubetask/internal/workflow"
 )
 
+const (
+	testLintNode = "lint"
+)
+
 // ---------------------------------------------------------------------------
 // 纯逻辑辅助函数：不依赖 envtest，覆盖调度判定的边界
 // ---------------------------------------------------------------------------
 
 func inlineSpec() *kubetaskv1.TaskSpec {
-	return &kubetaskv1.TaskSpec{Type: kubetaskv1.TaskTypeOneTime, Image: "busybox"}
+	return &kubetaskv1.TaskSpec{Type: kubetaskv1.TaskTypeOneTime, Image: testBusyboxImage}
 }
 
 func mustBuildGraph(t *testing.T, spec kubetaskv1.WorkflowSpec) *workflow.Graph {
@@ -48,13 +52,13 @@ func mustBuildGraph(t *testing.T, spec kubetaskv1.WorkflowSpec) *workflow.Graph 
 
 func TestDecideNode(t *testing.T) {
 	chained := []kubetaskv1.WorkflowTask{
-		{Name: "build", TaskSpec: inlineSpec()},
-		{Name: "test", DependsOn: []string{"build"}, TaskSpec: inlineSpec()},
+		{Name: testBuildNode, TaskSpec: inlineSpec()},
+		{Name: testTestNode, DependsOn: []string{testBuildNode}, TaskSpec: inlineSpec()},
 	}
 	runOnFailure := []kubetaskv1.WorkflowTask{
-		{Name: "build", TaskSpec: inlineSpec()},
-		{Name: "lint", TaskSpec: inlineSpec()},
-		{Name: "notify", DependsOn: []string{"build", "lint"}, RunOnFailure: true, TaskSpec: inlineSpec()},
+		{Name: testBuildNode, TaskSpec: inlineSpec()},
+		{Name: testLintNode, TaskSpec: inlineSpec()},
+		{Name: testNotifyNode, DependsOn: []string{testBuildNode, testLintNode}, RunOnFailure: true, TaskSpec: inlineSpec()},
 	}
 
 	tests := []struct {
@@ -69,28 +73,28 @@ func TestDecideNode(t *testing.T) {
 			name:   "root node is always ready",
 			tasks:  chained,
 			phases: map[string]kubetaskv1.WorkflowNodePhase{},
-			node:   "build",
+			node:   testBuildNode,
 			want:   nodeReady,
 		},
 		{
 			name:   "dependent waits while dependency is not terminal",
 			tasks:  chained,
-			phases: map[string]kubetaskv1.WorkflowNodePhase{"build": kubetaskv1.NodeRunning},
-			node:   "test",
+			phases: map[string]kubetaskv1.WorkflowNodePhase{testBuildNode: kubetaskv1.NodeRunning},
+			node:   testTestNode,
 			want:   nodeWait,
 		},
 		{
 			name:   "dependent runs once dependency succeeded",
 			tasks:  chained,
-			phases: map[string]kubetaskv1.WorkflowNodePhase{"build": kubetaskv1.NodeSucceeded},
-			node:   "test",
+			phases: map[string]kubetaskv1.WorkflowNodePhase{testBuildNode: kubetaskv1.NodeSucceeded},
+			node:   testTestNode,
 			want:   nodeReady,
 		},
 		{
 			name:    "dependent is skipped when dependency failed",
 			tasks:   chained,
-			phases:  map[string]kubetaskv1.WorkflowNodePhase{"build": kubetaskv1.NodeFailed},
-			node:    "test",
+			phases:  map[string]kubetaskv1.WorkflowNodePhase{testBuildNode: kubetaskv1.NodeFailed},
+			node:    testTestNode,
 			want:    nodeSkip,
 			wantMsg: `dependency "build" did not succeed`,
 		},
@@ -98,9 +102,9 @@ func TestDecideNode(t *testing.T) {
 			name:  "dependent is skipped when dependency was skipped",
 			tasks: chained,
 			phases: map[string]kubetaskv1.WorkflowNodePhase{
-				"build": kubetaskv1.NodeSkipped,
+				testBuildNode: kubetaskv1.NodeSkipped,
 			},
-			node:    "test",
+			node:    testTestNode,
 			want:    nodeSkip,
 			wantMsg: `dependency "build" did not succeed`,
 		},
@@ -108,50 +112,50 @@ func TestDecideNode(t *testing.T) {
 			name:  "runOnFailure waits until every dependency is terminal",
 			tasks: runOnFailure,
 			phases: map[string]kubetaskv1.WorkflowNodePhase{
-				"build": kubetaskv1.NodeFailed,
-				"lint":  kubetaskv1.NodeRunning,
+				testBuildNode: kubetaskv1.NodeFailed,
+				testLintNode:  kubetaskv1.NodeRunning,
 			},
-			node: "notify",
+			node: testNotifyNode,
 			want: nodeWait,
 		},
 		{
 			name:  "runOnFailure runs when a dependency failed",
 			tasks: runOnFailure,
 			phases: map[string]kubetaskv1.WorkflowNodePhase{
-				"build": kubetaskv1.NodeFailed,
-				"lint":  kubetaskv1.NodeSucceeded,
+				testBuildNode: kubetaskv1.NodeFailed,
+				testLintNode:  kubetaskv1.NodeSucceeded,
 			},
-			node: "notify",
+			node: testNotifyNode,
 			want: nodeReady,
 		},
 		{
 			name:  "runOnFailure runs when a dependency was skipped",
 			tasks: runOnFailure,
 			phases: map[string]kubetaskv1.WorkflowNodePhase{
-				"build": kubetaskv1.NodeSkipped,
-				"lint":  kubetaskv1.NodeSucceeded,
+				testBuildNode: kubetaskv1.NodeSkipped,
+				testLintNode:  kubetaskv1.NodeSucceeded,
 			},
-			node: "notify",
+			node: testNotifyNode,
 			want: nodeReady,
 		},
 		{
 			name:  "runOnFailure is skipped when every dependency succeeded",
 			tasks: runOnFailure,
 			phases: map[string]kubetaskv1.WorkflowNodePhase{
-				"build": kubetaskv1.NodeSucceeded,
-				"lint":  kubetaskv1.NodeSucceeded,
+				testBuildNode: kubetaskv1.NodeSucceeded,
+				testLintNode:  kubetaskv1.NodeSucceeded,
 			},
-			node:    "notify",
+			node:    testNotifyNode,
 			want:    nodeSkip,
 			wantMsg: "all dependencies succeeded",
 		},
 		{
 			name: "runOnFailure without dependencies never runs",
 			tasks: []kubetaskv1.WorkflowTask{
-				{Name: "notify", RunOnFailure: true, TaskSpec: inlineSpec()},
+				{Name: testNotifyNode, RunOnFailure: true, TaskSpec: inlineSpec()},
 			},
 			phases:  map[string]kubetaskv1.WorkflowNodePhase{},
-			node:    "notify",
+			node:    testNotifyNode,
 			want:    nodeSkip,
 			wantMsg: "all dependencies succeeded",
 		},
@@ -173,7 +177,7 @@ func TestDecideNode(t *testing.T) {
 }
 
 func TestValidateChildTaskNamesLengthBoundary(t *testing.T) {
-	node := "build"
+	node := testBuildNode
 	limit := naming.MaxTaskNameLength - len(node) - 1 // 工作流名可用的最大长度
 
 	tests := []struct {
@@ -223,20 +227,20 @@ func TestChildTaskSpecSanitizesTemplateFields(t *testing.T) {
 	delay := metav1.Duration{Duration: time.Minute}
 	templateSpec := kubetaskv1.TaskSpec{
 		Type:     kubetaskv1.TaskTypeCron,
-		Schedule: "*/5 * * * *",
+		Schedule: testCronSchedule,
 		Delay:    &delay,
 		Suspend:  &suspend,
-		Image:    "busybox",
-		Command:  []string{"echo", "hello"},
+		Image:    testBusyboxImage,
+		Command:  []string{testEchoCommand, testHelloArgument},
 	}
 	spec := kubetaskv1.WorkflowSpec{
-		Tasks:         []kubetaskv1.WorkflowTask{{Name: "build", Template: "cron-template"}},
-		TaskTemplates: map[string]kubetaskv1.TaskSpec{"cron-template": templateSpec},
+		Tasks:         []kubetaskv1.WorkflowTask{{Name: testBuildNode, Template: testCronTemplate}},
+		TaskTemplates: map[string]kubetaskv1.TaskSpec{testCronTemplate: templateSpec},
 	}
 	wf := &kubetaskv1.Workflow{Spec: spec}
 	graph := mustBuildGraph(t, spec)
 
-	got := childTaskSpec(wf, graph, "build")
+	got := childTaskSpec(wf, graph, testBuildNode)
 	if got.Type != kubetaskv1.TaskTypeOneTime {
 		t.Fatalf("type = %q, want OneTime", got.Type)
 	}
@@ -249,13 +253,13 @@ func TestChildTaskSpecSanitizesTemplateFields(t *testing.T) {
 	if got.Suspend != nil {
 		t.Fatalf("suspend = %v, want nil", got.Suspend)
 	}
-	if got.Image != "busybox" {
+	if got.Image != testBusyboxImage {
 		t.Fatalf("image = %q, want busybox (其它字段应原样保留)", got.Image)
 	}
 
 	// 快照语义：修改返回值不能影响 Workflow spec（否则重复 reconcile 会互相污染）。
 	got.Command[0] = "mutated"
-	if wf.Spec.TaskTemplates["cron-template"].Command[0] != "echo" {
+	if wf.Spec.TaskTemplates[testCronTemplate].Command[0] != testEchoCommand {
 		t.Fatal("childTaskSpec 返回的 slice 与 spec 共享底层数组")
 	}
 }
@@ -286,15 +290,15 @@ func TestChildTaskSpecFromInlineTaskSpec(t *testing.T) {
 func TestInitializeStatus(t *testing.T) {
 	spec := kubetaskv1.WorkflowSpec{
 		Tasks: []kubetaskv1.WorkflowTask{
-			{Name: "build", TaskSpec: inlineSpec()},
-			{Name: "test", DependsOn: []string{"build"}, TaskSpec: inlineSpec()},
+			{Name: testBuildNode, TaskSpec: inlineSpec()},
+			{Name: testTestNode, DependsOn: []string{testBuildNode}, TaskSpec: inlineSpec()},
 		},
 	}
 	graph := mustBuildGraph(t, spec)
 
 	finished := metav1.Now()
 	wf := &kubetaskv1.Workflow{
-		ObjectMeta: metav1.ObjectMeta{Generation: 3},
+		Generation: 3,
 		Spec:       spec,
 		Status: kubetaskv1.WorkflowStatus{
 			Phase:          kubetaskv1.WorkflowFailed,
@@ -302,7 +306,7 @@ func TestInitializeStatus(t *testing.T) {
 			CompletionTime: &finished,
 			Nodes: []kubetaskv1.WorkflowNodeStatus{
 				{Name: "ghost", Phase: kubetaskv1.NodeSucceeded},
-				{Name: "test", Phase: kubetaskv1.NodePending},
+				{Name: testTestNode, Phase: kubetaskv1.NodePending},
 			},
 		},
 	}
@@ -326,7 +330,7 @@ func TestInitializeStatus(t *testing.T) {
 		t.Fatal("startTime should be set")
 	}
 
-	want := []string{"build", "test"}
+	want := []string{testBuildNode, testTestNode}
 	if len(wf.Status.Nodes) != len(want) {
 		t.Fatalf("nodes = %+v, want %v", wf.Status.Nodes, want)
 	}
@@ -356,28 +360,28 @@ func TestSummarize(t *testing.T) {
 		{
 			name:        "keeps running while a node is pending",
 			phase:       kubetaskv1.WorkflowRunning,
-			nodes:       []kubetaskv1.WorkflowNodeStatus{{Name: "build", Phase: kubetaskv1.NodeRunning}, {Name: "test", Phase: kubetaskv1.NodePending}},
+			nodes:       []kubetaskv1.WorkflowNodeStatus{{Name: testBuildNode, Phase: kubetaskv1.NodeRunning}, {Name: testTestNode, Phase: kubetaskv1.NodePending}},
 			wantPhase:   kubetaskv1.WorkflowRunning,
 			wantChanged: false,
 		},
 		{
 			name:        "succeeds when all nodes are done",
 			phase:       kubetaskv1.WorkflowRunning,
-			nodes:       []kubetaskv1.WorkflowNodeStatus{{Name: "build", Phase: kubetaskv1.NodeSucceeded}, {Name: "notify", Phase: kubetaskv1.NodeSkipped}},
+			nodes:       []kubetaskv1.WorkflowNodeStatus{{Name: testBuildNode, Phase: kubetaskv1.NodeSucceeded}, {Name: testNotifyNode, Phase: kubetaskv1.NodeSkipped}},
 			wantPhase:   kubetaskv1.WorkflowSucceeded,
 			wantChanged: true,
 		},
 		{
 			name:        "fails when any node failed",
 			phase:       kubetaskv1.WorkflowRunning,
-			nodes:       []kubetaskv1.WorkflowNodeStatus{{Name: "build", Phase: kubetaskv1.NodeFailed}, {Name: "notify", Phase: kubetaskv1.NodeSkipped}},
+			nodes:       []kubetaskv1.WorkflowNodeStatus{{Name: testBuildNode, Phase: kubetaskv1.NodeFailed}, {Name: testNotifyNode, Phase: kubetaskv1.NodeSkipped}},
 			wantPhase:   kubetaskv1.WorkflowFailed,
 			wantChanged: true,
 		},
 		{
 			name:        "terminal workflow is left untouched (一次性语义)",
 			phase:       kubetaskv1.WorkflowSucceeded,
-			nodes:       []kubetaskv1.WorkflowNodeStatus{{Name: "build", Phase: kubetaskv1.NodeSucceeded}},
+			nodes:       []kubetaskv1.WorkflowNodeStatus{{Name: testBuildNode, Phase: kubetaskv1.NodeSucceeded}},
 			wantPhase:   kubetaskv1.WorkflowSucceeded,
 			wantChanged: false,
 		},
@@ -396,7 +400,7 @@ func TestSummarize(t *testing.T) {
 			if tt.wantChanged && wf.Status.CompletionTime == nil {
 				t.Fatal("completionTime should be set for terminal results")
 			}
-			if tt.wantPhase == kubetaskv1.WorkflowFailed && !strings.Contains(wf.Status.Message, "build") {
+			if tt.wantPhase == kubetaskv1.WorkflowFailed && !strings.Contains(wf.Status.Message, testBuildNode) {
 				t.Fatalf("failure message should name the failed node, got %q", wf.Status.Message)
 			}
 		})

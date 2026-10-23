@@ -31,18 +31,21 @@ import (
 	"kubetask.io/kubetask/internal/workflow"
 )
 
+const (
+	testCronSchedule = "*/5 * * * *"
+	testCronTemplate = "cron-template"
+)
+
 // createExistingChildTask 手工造一个"看起来已经存在"的子 Task，
 // 用来模拟 Controller 在创建子 Task 与写 status 之间重启的场景。
 func createExistingChildTask(wf *kubetaskv1.Workflow, node string, phase kubetaskv1.TaskPhase) {
 	task := &kubetaskv1.Task{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: workflow.ChildTaskName(wf.Name, node),
-			Labels: map[string]string{
-				workflowLabel:     wf.Name,
-				workflowNodeLabel: node,
-			},
+		Name: workflow.ChildTaskName(wf.Name, node),
+		Labels: map[string]string{
+			workflowLabel:     wf.Name,
+			workflowNodeLabel: node,
 		},
-		Spec: kubetaskv1.TaskSpec{Type: kubetaskv1.TaskTypeOneTime, Image: "busybox"},
+		Spec: kubetaskv1.TaskSpec{Type: kubetaskv1.TaskTypeOneTime, Image: testBusyboxImage},
 	}
 	Expect(controllerutil.SetControllerReference(wf, task, k8sClient.Scheme())).To(Succeed())
 	Expect(k8sClient.Create(ctx, task)).To(Succeed())
@@ -81,17 +84,17 @@ var _ = Describe("Workflow Controller edge cases", func() {
 			createWorkflow(newWorkflow(wfName))
 
 			// 模拟"子 Task 早已创建并跑完，但 Workflow status 还没写成功"。
-			createExistingChildTask(getWorkflow(wfName), "build", kubetaskv1.TaskSucceeded)
+			createExistingChildTask(getWorkflow(wfName), testBuildNode, kubetaskv1.TaskSucceeded)
 
 			reconcileWorkflow(wfName, 1)
 
 			// 关键点：终态的子 Task 不会再产生事件，必须在这一轮就落终态并推进下游。
 			stored := getWorkflow(wfName)
-			build := workflowNode(stored, "build")
+			build := workflowNode(stored, testBuildNode)
 			Expect(build.Phase).To(Equal(kubetaskv1.NodeSucceeded))
 			Expect(build.TaskName).To(Equal(wfName + "-build"))
 			Expect(build.CompletionTime).NotTo(BeNil())
-			Expect(workflowNode(stored, "test").Phase).To(Equal(kubetaskv1.NodeRunning))
+			Expect(workflowNode(stored, testTestNode).Phase).To(Equal(kubetaskv1.NodeRunning))
 			Expect(getChildTask(wfName + "-test")).NotTo(BeNil())
 		})
 	})
@@ -110,20 +113,20 @@ var _ = Describe("Workflow Controller edge cases", func() {
 			wf := newWorkflow(wfName)
 			wf.Spec.MaxParallel = 1
 			wf.Spec.Tasks = []kubetaskv1.WorkflowTask{
-				{Name: "first", Template: "go-build"},
-				{Name: "second", Template: "go-build"},
+				{Name: testFirstNode, Template: testBuildTemplate},
+				{Name: testSecondNode, Template: testBuildTemplate},
 			}
 
 			createWorkflow(wf)
 			reconcileWorkflow(wfName, 1)
-			Expect(workflowNode(getWorkflow(wfName), "second").Phase).To(Equal(kubetaskv1.NodePending))
+			Expect(workflowNode(getWorkflow(wfName), testSecondNode).Phase).To(Equal(kubetaskv1.NodePending))
 
 			setChildTaskPhase(wfName+"-first", kubetaskv1.TaskSucceeded)
 			reconcileWorkflow(wfName, 1)
 
 			stored := getWorkflow(wfName)
-			Expect(workflowNode(stored, "first").Phase).To(Equal(kubetaskv1.NodeSucceeded))
-			Expect(workflowNode(stored, "second").Phase).To(Equal(kubetaskv1.NodeRunning))
+			Expect(workflowNode(stored, testFirstNode).Phase).To(Equal(kubetaskv1.NodeSucceeded))
+			Expect(workflowNode(stored, testSecondNode).Phase).To(Equal(kubetaskv1.NodeRunning))
 			Expect(getChildTask(wfName + "-second")).NotTo(BeNil())
 		})
 	})
@@ -151,7 +154,7 @@ var _ = Describe("Workflow Controller edge cases", func() {
 			recreated := getChildTask(wfName + "-build")
 			Expect(recreated).NotTo(BeNil())
 			Expect(recreated.UID).NotTo(Equal(uidBefore), "应该是新建的对象，而不是原来的 Task")
-			Expect(workflowNode(getWorkflow(wfName), "build").Phase).To(Equal(kubetaskv1.NodeRunning))
+			Expect(workflowNode(getWorkflow(wfName), testBuildNode).Phase).To(Equal(kubetaskv1.NodeRunning))
 		})
 	})
 
@@ -167,7 +170,7 @@ var _ = Describe("Workflow Controller edge cases", func() {
 
 		It("reschedules the workflow from the corrected spec", func() {
 			wf := newWorkflow(wfName)
-			wf.Spec.Tasks = []kubetaskv1.WorkflowTask{{Name: "build", Template: "missing"}}
+			wf.Spec.Tasks = []kubetaskv1.WorkflowTask{{Name: testBuildNode, Template: "missing"}}
 			createWorkflow(wf)
 			reconcileWorkflow(wfName, 1)
 
@@ -176,7 +179,7 @@ var _ = Describe("Workflow Controller edge cases", func() {
 			Expect(failed.Status.CompletionTime).NotTo(BeNil())
 
 			// 修正 spec：换成存在的模板
-			failed.Spec.Tasks = []kubetaskv1.WorkflowTask{{Name: "build", Template: "go-build"}}
+			failed.Spec.Tasks = []kubetaskv1.WorkflowTask{{Name: testBuildNode, Template: testBuildTemplate}}
 			Expect(k8sClient.Update(ctx, failed)).To(Succeed())
 
 			reconcileWorkflow(wfName, 1)
@@ -186,7 +189,7 @@ var _ = Describe("Workflow Controller edge cases", func() {
 			Expect(stored.Status.Message).To(BeEmpty())
 			Expect(stored.Status.CompletionTime).To(BeNil())
 			Expect(stored.Status.ObservedGeneration).To(Equal(stored.Generation))
-			Expect(workflowNode(stored, "build").Phase).To(Equal(kubetaskv1.NodeRunning))
+			Expect(workflowNode(stored, testBuildNode).Phase).To(Equal(kubetaskv1.NodeRunning))
 			Expect(getChildTask(wfName + "-build")).NotTo(BeNil())
 		})
 	})
@@ -213,7 +216,7 @@ var _ = Describe("Workflow Controller edge cases", func() {
 
 			finished := getWorkflow(wfName)
 			finished.Spec.Tasks = append(finished.Spec.Tasks,
-				kubetaskv1.WorkflowTask{Name: "third", DependsOn: []string{"test"}, Template: "go-build"})
+				kubetaskv1.WorkflowTask{Name: "third", DependsOn: []string{testTestNode}, Template: testBuildTemplate})
 			Expect(k8sClient.Update(ctx, finished)).To(Succeed())
 
 			reconcileWorkflow(wfName, 2)
@@ -240,16 +243,16 @@ var _ = Describe("Workflow Controller edge cases", func() {
 			suspend := true
 			delay := metav1.Duration{Duration: time.Minute}
 			wf := &kubetaskv1.Workflow{
-				ObjectMeta: metav1.ObjectMeta{Name: wfName},
+				Name: wfName,
 				Spec: kubetaskv1.WorkflowSpec{
-					Tasks: []kubetaskv1.WorkflowTask{{Name: "build", Template: "cron-template"}},
+					Tasks: []kubetaskv1.WorkflowTask{{Name: testBuildNode, Template: testCronTemplate}},
 					TaskTemplates: map[string]kubetaskv1.TaskSpec{
-						"cron-template": {
+						testCronTemplate: {
 							Type:     kubetaskv1.TaskTypeCron,
-							Schedule: "*/5 * * * *",
+							Schedule: testCronSchedule,
 							Delay:    &delay,
 							Suspend:  &suspend,
-							Image:    "busybox",
+							Image:    testBusyboxImage,
 						},
 					},
 				},
@@ -283,8 +286,8 @@ var _ = Describe("Workflow Controller edge cases", func() {
 
 		It("fails the workflow instead of hijacking the foreign Task", func() {
 			foreign := &kubetaskv1.Task{
-				ObjectMeta: metav1.ObjectMeta{Name: wfName + "-build"},
-				Spec:       kubetaskv1.TaskSpec{Type: kubetaskv1.TaskTypeOneTime, Image: "busybox"},
+				Name: wfName + "-build",
+				Spec: kubetaskv1.TaskSpec{Type: kubetaskv1.TaskTypeOneTime, Image: testBusyboxImage},
 			}
 			Expect(k8sClient.Create(ctx, foreign)).To(Succeed())
 

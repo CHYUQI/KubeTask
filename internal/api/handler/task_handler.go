@@ -8,11 +8,16 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/robfig/cron/v3"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
+)
+
+const (
+	jsonKeyMessage = "message"
+	jsonKeyTask    = "task"
+	jsonKeyTotal   = "total"
 )
 
 type TaskHandler struct {
@@ -29,7 +34,7 @@ func NewTaskHandler(k8sClient client.Client) *TaskHandler {
 func (h *TaskHandler) Create(c *gin.Context) {
 	var task kubetaskv1.Task
 	if err := c.ShouldBindJSON(&task); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
@@ -43,26 +48,26 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		task.GenerateName = "kubetask-"
 	}
 	if task.Spec.Type == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "spec.type is required"})
+		c.JSON(http.StatusBadRequest, gin.H{jsonKeyError: "spec.type is required"})
 		return
 	}
 	if task.Spec.Image == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "spec.image is required"})
+		c.JSON(http.StatusBadRequest, gin.H{jsonKeyError: "spec.image is required"})
 		return
 	}
 	if task.Spec.Type == kubetaskv1.TaskTypeCron {
 		if _, err := cron.ParseStandard(task.Spec.Schedule); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cron expression: " + err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{jsonKeyError: "invalid cron expression: " + err.Error()})
 			return
 		}
 	}
 
 	if err := h.client.Create(c.Request.Context(), &task); err != nil {
 		if errors.IsAlreadyExists(err) {
-			c.JSON(http.StatusConflict, gin.H{"error": "task already exists"})
+			c.JSON(http.StatusConflict, gin.H{jsonKeyError: "task already exists"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
@@ -86,7 +91,7 @@ func (h *TaskHandler) List(c *gin.Context) {
 
 	tasks := &kubetaskv1.TaskList{}
 	if err := h.client.List(c.Request.Context(), tasks); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
@@ -118,10 +123,10 @@ func (h *TaskHandler) List(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"items":    result,
-		"total":    total,
-		"page":     page,
-		"pageSize": pageSize,
+		"items":      result,
+		jsonKeyTotal: total,
+		"page":       page,
+		"pageSize":   pageSize,
 	})
 }
 
@@ -134,10 +139,10 @@ func (h *TaskHandler) Get(c *gin.Context) {
 	task := &kubetaskv1.Task{}
 	if err := h.client.Get(c.Request.Context(), types.NamespacedName{Name: name}, task); err != nil {
 		if errors.IsNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: taskNotFoundMessage})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
@@ -153,21 +158,21 @@ func (h *TaskHandler) Update(c *gin.Context) {
 	existing := &kubetaskv1.Task{}
 	if err := h.client.Get(c.Request.Context(), types.NamespacedName{Name: name}, existing); err != nil {
 		if errors.IsNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: taskNotFoundMessage})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
 	var updated kubetaskv1.Task
 	if err := c.ShouldBindJSON(&updated); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 	if updated.Spec.Type == kubetaskv1.TaskTypeCron {
 		if _, err := cron.ParseStandard(updated.Spec.Schedule); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid cron expression: " + err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{jsonKeyError: "invalid cron expression: " + err.Error()})
 			return
 		}
 	}
@@ -177,7 +182,7 @@ func (h *TaskHandler) Update(c *gin.Context) {
 	existing.Annotations = updated.Annotations
 
 	if err := h.client.Update(c.Request.Context(), existing); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
@@ -191,19 +196,19 @@ func (h *TaskHandler) Delete(c *gin.Context) {
 	name := c.Param("name")
 
 	task := &kubetaskv1.Task{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Name: name,
 	}
 
 	if err := h.client.Delete(c.Request.Context(), task); err != nil {
 		if errors.IsNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: taskNotFoundMessage})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "task deleted"})
+	c.JSON(http.StatusOK, gin.H{jsonKeyMessage: "task deleted"})
 }
 
 // ==========================================================================
@@ -215,10 +220,10 @@ func (h *TaskHandler) Trigger(c *gin.Context) {
 	task := &kubetaskv1.Task{}
 	if err := h.client.Get(c.Request.Context(), types.NamespacedName{Name: name}, task); err != nil {
 		if errors.IsNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: taskNotFoundMessage})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
@@ -228,7 +233,7 @@ func (h *TaskHandler) Trigger(c *gin.Context) {
 	task.Annotations["kubetask.io/last-trigger"] = time.Now().UTC().Format(time.RFC3339)
 
 	if err := h.client.Update(c.Request.Context(), task); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
@@ -236,11 +241,11 @@ func (h *TaskHandler) Trigger(c *gin.Context) {
 	task.Status.ActiveJobs = nil
 
 	if err := h.client.Status().Update(c.Request.Context(), task); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "task triggered", "task": task.Name})
+	c.JSON(http.StatusOK, gin.H{jsonKeyMessage: "task triggered", jsonKeyTask: task.Name})
 }
 
 // ==========================================================================
@@ -249,24 +254,24 @@ func (h *TaskHandler) Trigger(c *gin.Context) {
 func (h *TaskHandler) Stats(c *gin.Context) {
 	tasks := &kubetaskv1.TaskList{}
 	if err := h.client.List(c.Request.Context(), tasks); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
 	stats := map[string]int{
-		"total":     0,
-		"pending":   0,
-		"running":   0,
-		"succeeded": 0,
-		"failed":    0,
-		"suspended": 0,
-		"onetime":   0,
-		"cron":      0,
-		"delay":     0,
+		jsonKeyTotal: 0,
+		"pending":    0,
+		"running":    0,
+		"succeeded":  0,
+		"failed":     0,
+		"suspended":  0,
+		"onetime":    0,
+		"cron":       0,
+		"delay":      0,
 	}
 
 	for _, t := range tasks.Items {
-		stats["total"]++
+		stats[jsonKeyTotal]++
 		switch t.Status.Phase {
 		case kubetaskv1.TaskPending:
 			stats["pending"]++
@@ -301,10 +306,10 @@ func (h *TaskHandler) Suspend(c *gin.Context) {
 	task := &kubetaskv1.Task{}
 	if err := h.client.Get(c.Request.Context(), types.NamespacedName{Name: name}, task); err != nil {
 		if errors.IsNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: taskNotFoundMessage})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
@@ -312,11 +317,11 @@ func (h *TaskHandler) Suspend(c *gin.Context) {
 	task.Spec.Suspend = &suspend
 
 	if err := h.client.Update(c.Request.Context(), task); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "task suspended", "task": task.Name})
+	c.JSON(http.StatusOK, gin.H{jsonKeyMessage: "task suspended", jsonKeyTask: task.Name})
 }
 
 // ==========================================================================
@@ -328,10 +333,10 @@ func (h *TaskHandler) Resume(c *gin.Context) {
 	task := &kubetaskv1.Task{}
 	if err := h.client.Get(c.Request.Context(), types.NamespacedName{Name: name}, task); err != nil {
 		if errors.IsNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: taskNotFoundMessage})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
@@ -339,11 +344,11 @@ func (h *TaskHandler) Resume(c *gin.Context) {
 	task.Spec.Suspend = &suspend
 
 	if err := h.client.Update(c.Request.Context(), task); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "task resumed", "task": task.Name})
+	c.JSON(http.StatusOK, gin.H{jsonKeyMessage: "task resumed", jsonKeyTask: task.Name})
 }
 
 // ==========================================================================
@@ -352,7 +357,7 @@ func (h *TaskHandler) Resume(c *gin.Context) {
 func (h *TaskHandler) Trend(c *gin.Context) {
 	tasks := &kubetaskv1.TaskList{}
 	if err := h.client.List(c.Request.Context(), tasks); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 

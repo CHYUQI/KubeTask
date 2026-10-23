@@ -33,7 +33,7 @@ import (
 var _ = Describe("Workflow CRD validation", func() {
 
 	oneTime := func() *kubetaskv1.TaskSpec {
-		return &kubetaskv1.TaskSpec{Type: kubetaskv1.TaskTypeOneTime, Image: "busybox"}
+		return &kubetaskv1.TaskSpec{Type: kubetaskv1.TaskTypeOneTime, Image: testBusyboxImage}
 	}
 
 	invalidSpecs := []struct {
@@ -47,8 +47,8 @@ var _ = Describe("Workflow CRD validation", func() {
 			desc: "rejects an inline taskSpec whose type is not OneTime",
 			mutate: func(spec *kubetaskv1.WorkflowSpec) {
 				spec.Tasks = []kubetaskv1.WorkflowTask{{
-					Name:     "build",
-					TaskSpec: &kubetaskv1.TaskSpec{Type: kubetaskv1.TaskTypeCron, Image: "busybox"},
+					Name:     testBuildNode,
+					TaskSpec: &kubetaskv1.TaskSpec{Type: kubetaskv1.TaskTypeCron, Image: testBusyboxImage},
 				}}
 			},
 			message: "OneTime",
@@ -58,8 +58,8 @@ var _ = Describe("Workflow CRD validation", func() {
 			desc: "rejects an inline taskSpec with schedule",
 			mutate: func(spec *kubetaskv1.WorkflowSpec) {
 				taskSpec := oneTime()
-				taskSpec.Schedule = "*/5 * * * *"
-				spec.Tasks = []kubetaskv1.WorkflowTask{{Name: "build", TaskSpec: taskSpec}}
+				taskSpec.Schedule = testCronSchedule
+				spec.Tasks = []kubetaskv1.WorkflowTask{{Name: testBuildNode, TaskSpec: taskSpec}}
 			},
 			message: "schedule",
 		},
@@ -69,7 +69,7 @@ var _ = Describe("Workflow CRD validation", func() {
 			mutate: func(spec *kubetaskv1.WorkflowSpec) {
 				taskSpec := oneTime()
 				taskSpec.Delay = &metav1.Duration{Duration: 30_000_000_000} // 30s
-				spec.Tasks = []kubetaskv1.WorkflowTask{{Name: "build", TaskSpec: taskSpec}}
+				spec.Tasks = []kubetaskv1.WorkflowTask{{Name: testBuildNode, TaskSpec: taskSpec}}
 			},
 			message: "delay",
 		},
@@ -80,7 +80,7 @@ var _ = Describe("Workflow CRD validation", func() {
 				taskSpec := oneTime()
 				suspended := true
 				taskSpec.Suspend = &suspended
-				spec.Tasks = []kubetaskv1.WorkflowTask{{Name: "build", TaskSpec: taskSpec}}
+				spec.Tasks = []kubetaskv1.WorkflowTask{{Name: testBuildNode, TaskSpec: taskSpec}}
 			},
 			message: "suspend",
 		},
@@ -89,8 +89,8 @@ var _ = Describe("Workflow CRD validation", func() {
 			desc: "rejects a node that sets both template and taskSpec",
 			mutate: func(spec *kubetaskv1.WorkflowSpec) {
 				spec.Tasks = []kubetaskv1.WorkflowTask{{
-					Name:     "build",
-					Template: "go-build",
+					Name:     testBuildNode,
+					Template: testBuildTemplate,
 					TaskSpec: oneTime(),
 				}}
 			},
@@ -100,7 +100,7 @@ var _ = Describe("Workflow CRD validation", func() {
 			slug: "no-source",
 			desc: "rejects a node that sets neither template nor taskSpec",
 			mutate: func(spec *kubetaskv1.WorkflowSpec) {
-				spec.Tasks = []kubetaskv1.WorkflowTask{{Name: "build"}}
+				spec.Tasks = []kubetaskv1.WorkflowTask{{Name: testBuildNode}}
 			},
 			message: "必须且只能设置一个",
 		},
@@ -116,7 +116,7 @@ var _ = Describe("Workflow CRD validation", func() {
 			slug: "bad-name",
 			desc: "rejects a node name that breaks the DNS-1123 pattern",
 			mutate: func(spec *kubetaskv1.WorkflowSpec) {
-				spec.Tasks = []kubetaskv1.WorkflowTask{{Name: "Build_Step", Template: "go-build"}}
+				spec.Tasks = []kubetaskv1.WorkflowTask{{Name: "Build_Step", Template: testBuildTemplate}}
 			},
 			message: "name",
 		},
@@ -125,11 +125,11 @@ var _ = Describe("Workflow CRD validation", func() {
 			desc: "rejects duplicated node names",
 			mutate: func(spec *kubetaskv1.WorkflowSpec) {
 				spec.Tasks = []kubetaskv1.WorkflowTask{
-					{Name: "build", Template: "go-build"},
-					{Name: "build", Template: "go-build"},
+					{Name: testBuildNode, Template: testBuildTemplate},
+					{Name: testBuildNode, Template: testBuildTemplate},
 				}
 			},
-			message: "build",
+			message: testBuildNode,
 		},
 		{
 			slug: "negative-parallel",
@@ -162,9 +162,9 @@ var _ = Describe("Workflow CRD validation", func() {
 	It("accepts a self-dependency at admission and leaves it to the controller", func() {
 		wf := newWorkflow("wf-self-dependency")
 		wf.Spec.Tasks = []kubetaskv1.WorkflowTask{{
-			Name:      "build",
-			DependsOn: []string{"build"},
-			Template:  "go-build",
+			Name:      testBuildNode,
+			DependsOn: []string{testBuildNode},
+			Template:  testBuildTemplate,
 		}}
 
 		Expect(k8sClient.Create(ctx, wf)).To(Succeed())

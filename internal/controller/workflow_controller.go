@@ -219,8 +219,7 @@ func (r *WorkflowReconciler) markWorkflowFailed(ctx context.Context, wf *kubetas
 
 // workflowFailureMessage 把校验错误转成 status.message：稳定的 Reason + 可读说明。
 func workflowFailureMessage(err error) string {
-	var validationErr *workflow.ValidationError
-	if stdErrors.As(err, &validationErr) {
+	if validationErr, ok := stdErrors.AsType[*workflow.ValidationError](err); ok {
 		return fmt.Sprintf("%s: %s", validationErr.Reason, validationErr.Message)
 	}
 	return err.Error()
@@ -494,12 +493,10 @@ func (r *WorkflowReconciler) listChildTasks(ctx context.Context, wf *kubetaskv1.
 func (r *WorkflowReconciler) createChildTask(ctx context.Context, wf *kubetaskv1.Workflow, graph *workflow.Graph, nodeName string) (*kubetaskv1.Task, error) {
 	name := workflow.ChildTaskName(wf.Name, nodeName)
 	task := &kubetaskv1.Task{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-			Labels: map[string]string{
-				workflowLabel:     wf.Name,
-				workflowNodeLabel: nodeName,
-			},
+		Name: name,
+		Labels: map[string]string{
+			workflowLabel:     wf.Name,
+			workflowNodeLabel: nodeName,
 		},
 		Spec: childTaskSpec(wf, graph, nodeName),
 	}

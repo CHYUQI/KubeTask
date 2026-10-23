@@ -15,6 +15,11 @@ import (
 	"kubetask.io/kubetask/internal/auth"
 )
 
+const (
+	testAudience       = "kubetask"
+	testServiceAccount = "system:serviceaccount:team-a:ci"
+)
+
 // TokenReviewInterface 仅暴露 Create；替身可检查请求并模拟 API Server 的校验结果。
 type tokenReviewFunc func(context.Context, *authenticationv1.TokenReview, metav1.CreateOptions) (*authenticationv1.TokenReview, error)
 
@@ -33,8 +38,8 @@ func TestNewServiceAccountAuthenticator(t *testing.T) {
 		audience string
 		wantErr  bool
 	}{
-		{name: "valid", reviews: reviews, audience: "kubetask"},
-		{name: "missing client", audience: "kubetask", wantErr: true},
+		{name: "valid", reviews: reviews, audience: testAudience},
+		{name: "missing client", audience: testAudience, wantErr: true},
 		{name: "empty audience", reviews: reviews, wantErr: true},
 		{name: "blank audience", reviews: reviews, audience: " \t", wantErr: true},
 	} {
@@ -49,7 +54,7 @@ func TestNewServiceAccountAuthenticator(t *testing.T) {
 
 func TestServiceAccountAuthenticatorRequestAndIdentity(t *testing.T) {
 	wantUser := authenticationv1.UserInfo{
-		Username: "system:serviceaccount:team-a:ci",
+		Username: testServiceAccount,
 		UID:      "account-uid",
 		Groups:   []string{"system:serviceaccounts", "system:serviceaccounts:team-a", "system:authenticated"},
 		Extra:    map[string]authenticationv1.ExtraValue{"authentication.kubernetes.io/credential-id": {"credential-id"}},
@@ -62,12 +67,12 @@ func TestServiceAccountAuthenticatorRequestAndIdentity(t *testing.T) {
 		if gotCtx.Value(contextKey{}) != "request-context" {
 			t.Error("request context was not passed to Kubernetes")
 		}
-		if review.Spec.Token != "opaque-token" || !reflect.DeepEqual(review.Spec.Audiences, []string{"kubetask"}) {
+		if review.Spec.Token != "opaque-token" || !reflect.DeepEqual(review.Spec.Audiences, []string{testAudience}) {
 			t.Error("TokenReview must carry the original token and explicit audience")
 		}
 		return &authenticationv1.TokenReview{Status: authenticationv1.TokenReviewStatus{
 			Authenticated: true,
-			Audiences:     []string{"other", "kubetask"},
+			Audiences:     []string{"other", testAudience},
 			User:          wantUser,
 		}}, nil
 	})
@@ -89,18 +94,18 @@ func TestServiceAccountAuthenticatorRejectsInvalidIdentity(t *testing.T) {
 		username      string
 		reviewError   string
 	}{
-		{name: "unauthenticated", audiences: []string{"kubetask"}, username: "system:serviceaccount:team-a:ci"},
+		{name: "unauthenticated", audiences: []string{testAudience}, username: testServiceAccount},
 		{name: "expired token", reviewError: "service account token has expired: opaque-token"},
-		{name: "authenticated with error", authenticated: true, audiences: []string{"kubetask"}, username: "system:serviceaccount:team-a:ci", reviewError: "cannot inspect opaque-token"},
-		{name: "missing audience", authenticated: true, username: "system:serviceaccount:team-a:ci"},
-		{name: "wrong audience", authenticated: true, audiences: []string{"kubernetes"}, username: "system:serviceaccount:team-a:ci"},
-		{name: "normal user", authenticated: true, audiences: []string{"kubetask"}, username: "alice"},
-		{name: "anonymous user", authenticated: true, audiences: []string{"kubetask"}, username: "system:anonymous"},
-		{name: "empty username", authenticated: true, audiences: []string{"kubetask"}},
-		{name: "empty namespace", authenticated: true, audiences: []string{"kubetask"}, username: "system:serviceaccount::ci"},
-		{name: "empty account name", authenticated: true, audiences: []string{"kubetask"}, username: "system:serviceaccount:team-a:"},
-		{name: "extra username segment", authenticated: true, audiences: []string{"kubetask"}, username: "system:serviceaccount:team-a:ci:extra"},
-		{name: "wrong identity prefix", authenticated: true, audiences: []string{"kubetask"}, username: "other:serviceaccount:team-a:ci"},
+		{name: "authenticated with error", authenticated: true, audiences: []string{testAudience}, username: testServiceAccount, reviewError: "cannot inspect opaque-token"},
+		{name: "missing audience", authenticated: true, username: testServiceAccount},
+		{name: "wrong audience", authenticated: true, audiences: []string{"kubernetes"}, username: testServiceAccount},
+		{name: "normal user", authenticated: true, audiences: []string{testAudience}, username: "alice"},
+		{name: "anonymous user", authenticated: true, audiences: []string{testAudience}, username: "system:anonymous"},
+		{name: "empty username", authenticated: true, audiences: []string{testAudience}},
+		{name: "empty namespace", authenticated: true, audiences: []string{testAudience}, username: "system:serviceaccount::ci"},
+		{name: "empty account name", authenticated: true, audiences: []string{testAudience}, username: "system:serviceaccount:team-a:"},
+		{name: "extra username segment", authenticated: true, audiences: []string{testAudience}, username: "system:serviceaccount:team-a:ci:extra"},
+		{name: "wrong identity prefix", authenticated: true, audiences: []string{testAudience}, username: "other:serviceaccount:team-a:ci"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			reviews := tokenReviewFunc(func(context.Context, *authenticationv1.TokenReview, metav1.CreateOptions) (*authenticationv1.TokenReview, error) {
@@ -196,7 +201,7 @@ func TestServiceAccountAuthenticatorHonorsContext(t *testing.T) {
 
 func newAuthenticator(t *testing.T, reviews authenticationclient.TokenReviewInterface) *auth.ServiceAccountAuthenticator {
 	t.Helper()
-	a, err := auth.NewServiceAccountAuthenticator(reviews, "kubetask")
+	a, err := auth.NewServiceAccountAuthenticator(reviews, testAudience)
 	if err != nil {
 		t.Fatalf("create authenticator: %v", err)
 	}

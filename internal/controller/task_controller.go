@@ -21,6 +21,10 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+const (
+	taskLabelKey = "kubetask.io/task"
+)
+
 const taskFinalizer = "kubetask.kubetask.io/finalizer"
 
 type TaskReconciler struct {
@@ -118,7 +122,7 @@ func (r *TaskReconciler) handleDeletion(ctx context.Context, task *kubetaskv1.Ta
 	log.Info("Handling Task deletion", "task", task.Name)
 
 	jobs := &batchv1.JobList{}
-	if err := r.List(ctx, jobs, client.MatchingLabels{"kubetask.io/task": task.Name}); err != nil {
+	if err := r.List(ctx, jobs, client.MatchingLabels{taskLabelKey: task.Name}); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -136,7 +140,7 @@ func (r *TaskReconciler) handleDeletion(ctx context.Context, task *kubetaskv1.Ta
 	}
 
 	jobs = &batchv1.JobList{}
-	if err := r.List(ctx, jobs, client.MatchingLabels{"kubetask.io/task": task.Name}); err != nil {
+	if err := r.List(ctx, jobs, client.MatchingLabels{taskLabelKey: task.Name}); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -330,7 +334,7 @@ func (r *TaskReconciler) createJobAndUpdateStatus(ctx context.Context, task *kub
 
 func (r *TaskReconciler) jobExists(ctx context.Context, taskName string) bool {
 	jobs := &batchv1.JobList{}
-	if err := r.List(ctx, jobs, client.MatchingLabels{"kubetask.io/task": taskName}); err != nil {
+	if err := r.List(ctx, jobs, client.MatchingLabels{taskLabelKey: taskName}); err != nil {
 		return false
 	}
 	return len(jobs.Items) > 0
@@ -354,11 +358,9 @@ func (r *TaskReconciler) constructJob(task *kubetaskv1.Task) (*batchv1.Job, erro
 	}
 
 	job := &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      jobName,
-			Namespace: "default",
-			Labels:    map[string]string{"kubetask.io/task": task.Name},
-		},
+		Name:      jobName,
+		Namespace: "default",
+		Labels:    map[string]string{taskLabelKey: task.Name},
 		Spec: batchv1.JobSpec{
 			BackoffLimit: &backoffLimit,
 			Template: corev1.PodTemplateSpec{
@@ -392,7 +394,7 @@ func (r *TaskReconciler) concurrencyAllowed(ctx context.Context, task *kubetaskv
 	log := ctrlLog.FromContext(ctx)
 
 	jobs := &batchv1.JobList{}
-	if err := r.List(ctx, jobs, client.MatchingLabels{"kubetask.io/task": task.Name}); err != nil {
+	if err := r.List(ctx, jobs, client.MatchingLabels{taskLabelKey: task.Name}); err != nil {
 		return true
 	}
 
@@ -436,7 +438,7 @@ func (r *TaskReconciler) syncJobStatus(ctx context.Context, task *kubetaskv1.Tas
 	log := ctrlLog.FromContext(ctx)
 
 	jobs := &batchv1.JobList{}
-	if err := r.List(ctx, jobs, client.MatchingLabels{"kubetask.io/task": task.Name}); err != nil {
+	if err := r.List(ctx, jobs, client.MatchingLabels{taskLabelKey: task.Name}); err != nil {
 		return ctrl.Result{}, err
 	}
 

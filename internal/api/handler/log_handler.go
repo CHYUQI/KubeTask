@@ -18,6 +18,11 @@ import (
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
 )
 
+const (
+	jsonKeyError        = "error"
+	taskNotFoundMessage = "task not found"
+)
+
 type LogHandler struct {
 	client    client.Client
 	clientset kubernetes.Interface
@@ -36,21 +41,21 @@ func (h *LogHandler) Stream(c *gin.Context) {
 	task := &kubetaskv1.Task{}
 	if err := h.client.Get(c.Request.Context(), types.NamespacedName{Name: taskName}, task); err != nil {
 		if k8serrors.IsNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: taskNotFoundMessage})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
 	jobs := &batchv1.JobList{}
 	if err := h.client.List(c.Request.Context(), jobs, client.MatchingLabels{"kubetask.io/task": taskName}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
 	if len(jobs.Items) == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no jobs found for task"})
+		c.JSON(http.StatusNotFound, gin.H{jsonKeyError: "no jobs found for task"})
 		return
 	}
 
@@ -61,12 +66,12 @@ func (h *LogHandler) Stream(c *gin.Context) {
 		client.InNamespace(job.Namespace),
 		client.MatchingLabels{"job-name": job.Name},
 	); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
 	if len(pods.Items) == 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no pods found for job"})
+		c.JSON(http.StatusNotFound, gin.H{jsonKeyError: "no pods found for job"})
 		return
 	}
 
@@ -89,7 +94,7 @@ func (h *LogHandler) Stream(c *gin.Context) {
 	req := h.clientset.CoreV1().Pods(pod.Namespace).GetLogs(pod.Name, logOpts)
 	stream, err := req.Stream(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to open log stream: %v", err)})
+		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: fmt.Sprintf("failed to open log stream: %v", err)})
 		return
 	}
 	defer func() { _ = stream.Close() }()

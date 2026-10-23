@@ -60,12 +60,12 @@ func TestServiceAccountTokenAuthentication(t *testing.T) {
 	}
 	const namespace, account, audience = "auth-integration", "ci", "kubetask"
 	if _, err := admin.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{Name: namespace},
+		Name: namespace,
 	}, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	sa, err := admin.CoreV1().ServiceAccounts(namespace).Create(ctx, &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{Name: account},
+		Name: account,
 	}, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)

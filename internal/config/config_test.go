@@ -11,6 +11,16 @@ import (
 	"kubetask.io/kubetask/internal/config"
 )
 
+const (
+	testEnabledYAML      = "auth-enabled: true"
+	testTrueString       = "true"
+	testFlagAudience     = "flag-audience"
+	missingAudienceError = "auth-audience is required"
+	testAudience         = "kubetask"
+	testAudienceFlag     = "-auth-audience=flag-audience"
+	testEnvAudience      = "env-audience"
+)
+
 func TestLoadAuthenticationConfig(t *testing.T) {
 	for _, tt := range []struct {
 		name        string
@@ -23,22 +33,22 @@ func TestLoadAuthenticationConfig(t *testing.T) {
 		wantError   string
 	}{
 		{name: "defaults"},
-		{name: "YAML enabled", yaml: "auth-enabled: true\nauth-audience: kubetask", enabled: true, audience: "kubetask"},
-		{name: "missing audience", yaml: "auth-enabled: true", wantError: "auth-audience is required"},
-		{name: "blank audience", yaml: "auth-enabled: true\nauth-audience: '  '", wantError: "auth-audience is required"},
-		{name: "trim audience", yaml: "auth-enabled: true\nauth-audience: ' kubetask '", enabled: true, audience: "kubetask"},
-		{name: "disabled with audience", yaml: "auth-enabled: false\nauth-audience: kubetask", audience: "kubetask"},
+		{name: "YAML enabled", yaml: "auth-enabled: true\nauth-audience: kubetask", enabled: true, audience: testAudience},
+		{name: "missing audience", yaml: testEnabledYAML, wantError: missingAudienceError},
+		{name: "blank audience", yaml: "auth-enabled: true\nauth-audience: '  '", wantError: missingAudienceError},
+		{name: "trim audience", yaml: "auth-enabled: true\nauth-audience: ' kubetask '", enabled: true, audience: testAudience},
+		{name: "disabled with audience", yaml: "auth-enabled: false\nauth-audience: kubetask", audience: testAudience},
 		{name: "invalid YAML bool", yaml: "auth-enabled: not-a-bool", wantError: "failed to unmarshal config"},
-		{name: "environment enabled", envEnabled: "true", envAudience: "env-audience", enabled: true, audience: "env-audience"},
-		{name: "environment overrides YAML", yaml: "auth-enabled: false\nauth-audience: yaml-audience", envEnabled: "true", envAudience: "env-audience", enabled: true, audience: "env-audience"},
-		{name: "environment disables YAML", yaml: "auth-enabled: true", envEnabled: "false"},
-		{name: "environment missing audience", envEnabled: "true", wantError: "auth-audience is required"},
+		{name: "environment enabled", envEnabled: testTrueString, envAudience: testEnvAudience, enabled: true, audience: testEnvAudience},
+		{name: "environment overrides YAML", yaml: "auth-enabled: false\nauth-audience: yaml-audience", envEnabled: testTrueString, envAudience: testEnvAudience, enabled: true, audience: testEnvAudience},
+		{name: "environment disables YAML", yaml: testEnabledYAML, envEnabled: "false"},
+		{name: "environment missing audience", envEnabled: testTrueString, wantError: missingAudienceError},
 		{name: "invalid environment bool", envEnabled: "not-a-bool", wantError: "failed to unmarshal config"},
-		{name: "flags enabled", args: []string{"-auth-enabled", "-auth-audience=flag-audience"}, enabled: true, audience: "flag-audience"},
-		{name: "flag supplies required YAML audience", yaml: "auth-enabled: true", args: []string{"-auth-audience=flag-audience"}, enabled: true, audience: "flag-audience"},
-		{name: "flags override environment", yaml: "auth-enabled: false\nauth-audience: yaml-audience", envEnabled: "false", envAudience: "env-audience", args: []string{"-auth-enabled=true", "-auth-audience=flag-audience"}, enabled: true, audience: "flag-audience"},
-		{name: "explicit false overrides environment", envEnabled: "true", args: []string{"-auth-enabled=false"}},
-		{name: "explicit empty audience overrides environment", envEnabled: "true", envAudience: "env-audience", args: []string{"-auth-audience="}, wantError: "auth-audience is required"},
+		{name: "flags enabled", args: []string{"-auth-enabled", testAudienceFlag}, enabled: true, audience: testFlagAudience},
+		{name: "flag supplies required YAML audience", yaml: testEnabledYAML, args: []string{testAudienceFlag}, enabled: true, audience: testFlagAudience},
+		{name: "flags override environment", yaml: "auth-enabled: false\nauth-audience: yaml-audience", envEnabled: "false", envAudience: testEnvAudience, args: []string{"-auth-enabled=true", testAudienceFlag}, enabled: true, audience: testFlagAudience},
+		{name: "explicit false overrides environment", envEnabled: testTrueString, args: []string{"-auth-enabled=false"}},
+		{name: "explicit empty audience overrides environment", envEnabled: testTrueString, envAudience: testEnvAudience, args: []string{"-auth-audience="}, wantError: missingAudienceError},
 		{name: "unvisited flag defaults preserve YAML", yaml: "auth-enabled: true\nauth-audience: yaml-audience", enabled: true, audience: "yaml-audience"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
