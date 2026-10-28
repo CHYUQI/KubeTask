@@ -16,6 +16,15 @@ config:
   logLevel: info
   logFormat: json
 
+# URL is injected from an existing Secret; restart Pods after changing it.
+webhook:
+  enabled: false
+  timeout: 5s
+  maxRetries: 3
+  existingSecret:
+    name: ""
+    key: url
+
 resources:
   limits:
     cpu: 500m

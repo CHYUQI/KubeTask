@@ -10,3 +10,6 @@ data:
     log-format: {{ .Values.config.logFormat }}
     api-port: {{ .Values.api.port }}
     api-host: {{ .Values.api.host }}
+    webhook-enabled: {{ .Values.webhook.enabled }}
+    webhook-timeout: {{ .Values.webhook.timeout | quote }}
+    webhook-max-retries: {{ .Values.webhook.maxRetries }}

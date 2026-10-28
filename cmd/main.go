@@ -30,6 +30,7 @@ import (
 	"kubetask.io/kubetask/internal/config"
 	"kubetask.io/kubetask/internal/controller"
 	"kubetask.io/kubetask/internal/logger"
+	"kubetask.io/kubetask/internal/notification"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -135,6 +136,16 @@ func main() {
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
+
+	if cfg.WebhookEnabled {
+		if err := notification.SetupWithManager(mgr, notification.Options{
+			URL: cfg.WebhookURL, Timeout: cfg.WebhookTimeout, MaxRetries: cfg.WebhookMaxRetries,
+		}); err != nil {
+			setupLog.Error(err, "Failed to setup outbound webhook notifications")
+			os.Exit(1)
+		}
+	}
+	setupLog.Info("Outbound webhook notifications configured", "enabled", cfg.WebhookEnabled)
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "Failed to add health check")

@@ -1,6 +1,6 @@
 # kubetask - AI Agent Guide
 
-最后核对：2026-10-22。项目状态与验证边界见 [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)。
+最后核对：2026-10-26。项目状态与验证边界见 [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)。
 
 ## Actual Project Structure
 
@@ -16,6 +16,7 @@ kubetask/
 │   ├── config/config.go                ← EnvVar > YAML > 默认值；认证支持显式 Flag 覆盖
 │   ├── logger/logger.go                ← Zap Logger (AtomicLevel 动态改级别)
 │   ├── auth/serviceaccount.go          ← TokenReview 身份认证（尚无资源授权）
+│   ├── notification/                  ← 独立 Job 观察、内存队列、全局 Webhook 与测试
 │   ├── naming/naming.go                ← Task 名称长度唯一常量（46）
 │   ├── workflow/dag.go                 ← DAG 校验、拓扑排序、分层、子 Task 命名
 │   ├── testutil/                       ← envtest 跨平台停止与 Windows 孤儿进程清理
@@ -250,6 +251,13 @@ API 修改 spec/metadata 用 `Update()`；Trigger 还会单独调用 `Status().U
 
 - 事实来源是 `internal/api/router.go`；改路由或响应结构时必须同步更新 `docs/API.md`。
 - 新增端点时同时补 handler 测试（`internal/api/handler/*_test.go`）。
+
+### 全局 Webhook MVP
+
+- `internal/notification` 作为需 Leader Election 的 Manager Runnable，复用 Job informer；仅 JobFailed=True 告警，DeadlineExceeded 分类为 task.timeout，不依赖 Task phase / 历史。
+- 初始同步的旧失败不发送；实时失败异步提交有界内存队列。重启、队列满或重试耗尽可能丢失，接收方按 Job UID 派生的 eventId 去重；不宣称必达。
+- 全局配置为 webhook-enabled/url/timeout/max-retries，默认关闭；Helm 通过已有 Secret 的 secretKeyRef 注入 URL，不增加读取 Secret API 的权限。
+- 不记录完整 URL、请求/响应正文或原始网络错误；不要将通知重试失败传回 Task / Workflow 状态或阻塞 Reconcile。设计、协议及真实集群待验收步骤见 PROJECT_PLAN.md 的 P2.3。
 
 ---
 
