@@ -2,7 +2,7 @@
 
 ## 项目计划书与实现进度
 
-最后核对：2026-10-22。MVP 与 P2.0/P2.1 已实现，P2.2 认证部分完成。版本号为规划标签，不表示已发布；当前 Chart/image 默认标签仍为 v0.1.0。当前验证结果见 [项目状态](docs/PROJECT_STATUS.md)，历史节点保留其当时的测试数量与验收范围。
+最后核对：2026-10-26。MVP 与 P2.0/P2.1 已实现，P2.2 认证部分完成；P2.3 全局通用 Webhook MVP 已实现，真实集群验收待完成。版本号为规划标签，不表示已发布；当前 Chart/image 默认标签仍为 v0.1.0。当前验证结果见 [项目状态](docs/PROJECT_STATUS.md)，历史节点保留其当时的测试数量与验收范围。
 
 ---
 
@@ -22,7 +22,7 @@
 ```
 KISS 原则 → 先做精，再做全
 稳定可靠 → 优于功能丰富
-可观测 → 已有 Metrics + 日志，应用告警规划中
+可观测 → 已有 Metrics + 日志 + 全局 Webhook 尽力投递
 渐进式 → 每个 Phase 都是独立可用的版本
 ```
 
@@ -33,7 +33,7 @@ KISS 原则 → 先做精，再做全
 | 问题 | 传统方案 | KubeTask 方案 |
 |------|----------|--------------|
 | 定时任务无统一视图 | Shell crontab / Jenkins 分散管理 | Web 管理后台 + 统一 Task CRD |
-| 任务失败无告警 | 靠人盯着 | Job 重试已实现；Webhook/钉钉通知规划中 |
+| 任务失败无告警 | 靠人盯着 | Job 重试与全局 Webhook MVP 已实现；钉钉等渠道规划中 |
 | 任务依赖无法编排 | 手写脚本链式调用 | DAG 工作流（YAML 定义） |
 | 集群资源浪费 | 固定调度 | 资源水位感知 + 错峰调度（规划） |
 | 边缘+云端割裂 | 分别管理 | 多集群统一管理（规划） |
@@ -229,12 +229,92 @@ spec:
 > 2026-10-20：前端接入已有 ServiceAccount 认证，支持页面内存中的 Token 设置/清除、全部业务 API 与 SSE 日志请求头，以及 401/403/503 提示。详见 [前端认证验收记录](docs/P2.2_FRONTEND_AUTH_VERIFICATION.md)。RBAC 授权、租户隔离、API Key 和审计仍待完成。
 
 #### P2.3 告警通知（1 周）
-- [ ] **Webhook 通知**：任务失败/超时 → 发送 JSON Payload
+- [x] **全局 Webhook MVP**：任务执行失败/超时 → 固定 JSON Payload，异步尽力投递（真实集群验收待完成）
 - [ ] **内置通知渠道**
   - 钉钉机器人
   - 企业微信机器人
   - Slack Webhook
 - [ ] **通知模板**：可自定义消息格式
+
+##### 全局通用 Webhook MVP（2026-10-26 定案）
+
+本次先交付单地址、固定 JSON 的 Task 执行失败/超时通知，默认关闭；使用有界内存队列与有限重试，提供尽力投递。内置机器人渠道、模板、Workflow 整体失败汇总、成功通知、逐任务规则、签名及自定义认证头后续实现。本方案直接维护在本计划书，不新增设计文档。
+
+**事件范围与来源**
+
+- 独立观察 Manager 已有的 Job informer，不依赖 Task phase 或最近十条执行历史；不修改 Task / Workflow CRD、执行状态及调度语义。
+- Job 的 controller OwnerReference 必须指向本项目的 Task（核对 API Group / Kind / UID），不能仅按标签判断归属。任务暂停不影响已有 Job 的失败通知。
+- 仅 `JobFailed=True` 触发：Reason 为 `DeadlineExceeded` 时发送 `task.timeout`，其他情况发送 `task.failed`；超时不再额外发送失败事件。Pod 重试、FailureTarget、成功、参数校验错误及删除动作不触发通知。
+- OneTime / Delay / Cron 均按每次 Job 执行通知；新的 Job UID 对应新的事件。Workflow 子 Task 可附带 Workflow 名称、UID 与节点信息，本次不发送整体汇总。
+- 首次同步时已失败的 Job 作为历史基线跳过；基线中的运行中 Job 后续失败、初始同步结束后新发现的失败 Job 均发送。相同失败状态的更新或重同步不重新触发。
+- 重启与 Leader 切换重新建立基线，不补发停机期间的历史失败；Watch 重连仍需经过进程内去重，不承诺跨进程仅投递一次。
+
+**协议与快照**
+
+请求使用 `POST`、`Content-Type: application/json`、`X-KubeTask-Event-ID`。示例：
+
+```json
+{
+  "version": "1",
+  "eventId": "job:<job-uid>:failed",
+  "type": "task.timeout",
+  "occurredAt": "2026-10-26T10:00:00Z",
+  "observedAt": "2026-10-26T10:00:01Z",
+  "task": {"name": "report-flow-export", "uid": "<task-uid>", "type": "OneTime"},
+  "execution": {
+    "jobName": "report-flow-export-1793000000",
+    "jobUid": "<job-uid>",
+    "namespace": "default",
+    "reason": "DeadlineExceeded",
+    "message": "Job exceeded its active deadline"
+  },
+  "workflow": {"name": "report-flow", "uid": "<workflow-uid>", "node": "export"}
+}
+```
+
+- eventId 标识一次 Job 最终失败，超时也使用 `job:<uid>:failed`；所有 HTTP 重试保持相同 ID 和 JSON 内容。
+- occurredAt 取失败条件 LastTransitionTime，缺失则省略；observedAt 为本进程观察时间。Task 名称/UID 来自 OwnerReference，type 与 workflow 为可选补充字段。
+- Watch 回调只复制必要结果快照并非阻塞入队；worker 从缓存补充 Task 信息且核对 UID。资源被删除或读取失败时仍发送基础消息，不关联同名新资源。已入队事件不依赖 Job 继续存在。
+- message 最多 4 KiB，按 UTF-8 边界截断并添加 `messageTruncated: true`；不发送命令、环境变量、完整 spec 或 Pod 日志。
+- 通知依据已经落库的 Job 结果，不等待 Task phase 同步；收到通知时 Task API 可能短暂仍显示 Running。
+
+**队列、去重与 HTTP 投递**
+
+- 固定 128 条等待队列、2 个 worker；队列满丢弃新事件并记录日志，不阻塞 Watch / Reconcile，不为事件额外启动 goroutine。
+- 使用 eventId 去重，入队与 pending 登记原子完成；pending / sending 不淘汰，投递结束的 delivered / rejected / exhausted 最多保留 4096 条、24 小时。淘汰或重启后可能重复，接收方应按 eventId 去重。
+- HTTP 2xx 成功；网络错误、超时、429、5xx 重试；其他 4xx 和 3xx 停止，不跟随重定向，不解析响应正文或 Retry-After。
+- max-retries 表示首次请求之外的重试次数；默认 3，即最多 4 次请求。退避为 1 / 2 / 4 秒，继续翻倍时单次最多 30 秒；每个 worker 串行处理一个事件及其重试。
+- 复用 HTTP Client / 连接池，验证 HTTPS 证书；日志记录事件 ID、Task / Job、状态码、尝试次数和错误分类，不输出完整 URL、请求/响应正文或可能包含 URL 的原始网络错误。
+- 观察器及 worker 作为需 Leader Election 的 Manager Runnable 启停；关闭时取消请求与退避，不保证排空队列。Webhook 故障不改变任务结果或健康状态。禁用 Leader Election 的多副本可能重复投递。
+
+**配置与 Helm**
+
+环境变量优先于 YAML、YAML 优先于默认值，不增加 Flag，不热更新：
+
+| 配置项 | 环境变量 | 默认值 / 校验 |
+| --- | --- | --- |
+| webhook-enabled | KUBETASK_WEBHOOK_ENABLED | false；关闭时不注册通知模块 |
+| webhook-url | KUBETASK_WEBHOOK_URL | 开启时必填，HTTP/HTTPS、非空 host，不接受 userinfo / fragment；报错不回显地址 |
+| webhook-timeout | KUBETASK_WEBHOOK_TIMEOUT | 5s；开启时限制 1–30 秒，单次请求总超时 |
+| webhook-max-retries | KUBETASK_WEBHOOK_MAX_RETRIES | 3；开启时限制 0–5 次 |
+
+Helm 增加 `webhook.enabled / timeout / maxRetries / existingSecret.name / existingSecret.key`，key 默认为 `url`。非敏感配置进入 ConfigMap，URL 由已有 Secret 通过 secretKeyRef 注入环境变量；启用但未提供 Secret 名称时模板报错，不代建 Secret，也不增加 Secret API 读取权限。配置及 Secret 更新后重启进程/Pod。Standalone 无 Job，不启动通知模块。
+
+**实现与验收**
+
+- 新增 `internal/notification/{event,observer,dispatcher,webhook}.go` 及必要测试；接入现有配置、main 和 Helm 模板。
+- 单测使用 httptest 验证协议、重试/拒绝/超时、内容稳定、去重并发、队列满和取消；配置测试验证默认值、环境覆盖、参数与地址脱敏。
+- envtest 验证真实 informer 的初始同步基线、失败转换、子 Task 上下文和资源删除；不把注入 Job 状态当作真实 Pod 执行验收。
+- 完成 Go 编译 / vet / 生成物核对 / 默认全部测试、通知模块 race 测试、Helm lint 与 Secret 渲染检查。真实集群另验失败、超时和连续 Cron 执行，记录是否实际执行，不宣称通知必达。
+
+**真实集群验收步骤（本次尚未执行）**
+
+1. 准备能记录请求头与 JSON 并返回 204 的通用接收端；构建包含本实现的镜像。将地址放入发布命名空间中的 Secret，设置 `webhook.enabled=true`、`webhook.existingSecret.name` 及新镜像标签后部署。
+2. 创建 OneTime Task：`command: ["sh", "-c", "exit 1"]`、`backoffLimit: 0`；等待 Job Failed，检查一次 `task.failed`，Job UID 与 eventId 对应。
+3. 创建另一 OneTime Task：`command: ["sh", "-c", "sleep 300"]`、`activeDeadlineSeconds: 5`；等待 Job Failed/DeadlineExceeded，检查只收到 `task.timeout`。
+4. 创建 Cron Task：`schedule: "* * * * *"`、退出码为 1、`backoffLimit: 0`；至少观察两次执行，确认分别对应两个 Job UID。完成后删除该 Cron Task，避免继续执行。
+5. 使用非零 backoffLimit 观察 Pod 重试阶段不发告警；对已失败 Job 更新 metadata 不重复发送；重启 KubeTask 不补发已有失败。另创建包含失败节点的 Workflow，检查子任务上下文，不应产生整体汇总消息。
+6. 接收端依次返回 503/204、401、307，核对重试与停止行为；保持失败响应检查总尝试次数，确认通知故障不阻塞新 Task 执行。短 TTL 在观察前清理掉的执行结果不能由本 MVP 恢复。
 
 #### P2.4 调度增强（1 周）
 - [ ] **资源感知调度**：根据集群节点 CPU/Mem 负载选择执行节点
@@ -364,6 +444,7 @@ kubetask/
 │   ├── auth/serviceaccount.go         # Kubernetes TokenReview
 │   ├── workflow/dag.go                # DAG 校验、拓扑序、分层与命名
 │   ├── naming/naming.go               # 名称长度常量
+│   ├── notification/                  # 独立 Job 观察、全局 Webhook 队列与投递
 │   ├── config/                        # Viper
 │   ├── logger/                        # Zap
 │   └── testutil/                      # envtest 停止与 Windows 清理
@@ -429,6 +510,7 @@ Manager 在默认 `:8081` 提供 `/healthz`、`/readyz`；业务端口 `:8080` �
 ### 已有交付物
 - [x] Task / Workflow Go 类型、生成 CRD / RBAC / DeepCopy、两个 Reconciler
 - [x] Gin API、可选 TokenReview 身份认证、SSE 与静态托管
+- [x] 全局通用 Webhook MVP、配置与 Helm Secret 接入（尽力投递，真实集群待验收）
 - [x] Vue 3 源码、内存 Token 接入、DAG 与认证测试
 - [x] Dockerfile、Helm Chart、k3s 脚本（源码交付与部署验收分别记录）
 - [x] Windows minikube 工作流集成脚本
@@ -437,7 +519,7 @@ Manager 在默认 `:8081` 提供 `/healthz`、`/readyz`；业务端口 `:8080` �
 
 ### 后续交付物
 - [ ] RBAC 资源授权、租户隔离、API Key 与审计
-- [ ] 通知渠道、业务指标、Grafana Dashboard 与告警规则
+- [ ] 内置机器人通知渠道、业务指标、Grafana Dashboard 与告警规则
 - [ ] 多集群、资源感知、错峰调度
 - [ ] PostgreSQL / GORM 与迁移（规划项，当前无数据库运行要求）
 - [ ] 独立架构/部署/开发文档、CHANGELOG（现有内容见 README、本计划及 Agent 指南）
@@ -451,7 +533,7 @@ Manager 在默认 `:8081` 提供 `/healthz`、`/readyz`；业务端口 `:8080` �
 | 认证与授权 | 目前仅确认身份；后续接资源授权，不能把 ServiceAccount namespace 当租户隔离 |
 | 部署配置 | 开启认证需 TokenReview create 权限；Chart 尚未接入认证 values；在隔离环境验证后发布 |
 | Watch 与执行状态 | 依赖 controller-runtime 与 Job 条件同步；envtest 不运行真实 Job/Pod 控制器，需真实集群补充 |
-| 任务耗时 | activeDeadlineSeconds 已传给 Job；超时通知尚未实现 |
+| 任务耗时 | activeDeadlineSeconds 已传给 Job；DeadlineExceeded 可通过全局 Webhook 尽力通知，真实集群待验收 |
 | 历史与日志保留 | Task 仅留最近 10 条摘要；TTL 清理 Job/Pod 后无法继续读取其日志，尚无外部归档 |
 | 前端体积 | 2026-10-22 已移除 ECharts，Dashboard 约 8.6kB；剩余较大模块为原版 WebGL 渲染器，按需加载 |
 | 尚未实现的特性 | 多集群、数据库、预测调度需各自设计与验收，当前不声明可靠性结论 |
@@ -485,7 +567,7 @@ kubectl apply -f config/samples/kubetask_v1_task.yaml
 
 公开入口为 Web UI/API `:8080`，Manager 探针 `:8081`，TLS Metrics `:8443`。Chart 的 `metrics.port` 目前用于 8081 探针端口声明，不代表 Metrics 默认监听 8081；认证 values 和 TokenReview 权限尚未接入 Chart，开启步骤见 [API 文档](docs/API.md#11-认证配置与路由接入)。Helm 升级时需单独核对 CRD 更新，`crds/` 与 `config/crd/bases/` 应保持同步。
 
-当前版本尚无调用者资源授权、租户隔离、审计与应用告警，生产可用性需独立验收；本计划不声明已经达到生产指标。
+当前已有全局 Webhook 尽力投递，尚无调用者资源授权、租户隔离、审计与内置机器人通知；Webhook 真实集群及生产可用性需独立验收，本计划不声明已经达到生产指标。
 
 ---
 
@@ -536,4 +618,4 @@ kubectl apply -f config/samples/kubetask_v1_task.yaml
 
 ---
 
-> **进度**：v0.2.0 规划进行中，P2.2 部分完成 | **最后核对**：2026-10-20
+> **进度**：v0.2.0 规划进行中，P2.2 部分完成、P2.3 Webhook MVP 已实现 | **最后核对**：2026-10-26

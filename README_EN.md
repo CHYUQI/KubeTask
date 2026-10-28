@@ -8,7 +8,7 @@ KubeTask describes tasks and workflows with custom resources (CRDs): a `Task` is
 
 > Positioning: lightweight, extensible, and easy to deploy — suitable for small/medium teams, edge computing (k3s), and cloud-native learning.
 
-Status (2026-10-20): P2.0 same-port packaging and P2.1 Workflow orchestration/UI are implemented. P2.2 includes ServiceAccount authentication and frontend Token support; resource authorization, tenant isolation, API keys, and auditing remain pending. See [project status](docs/PROJECT_STATUS.md) for current checks and validation limits.
+Status (2026-10-26): P2.0 same-port packaging and P2.1 Workflow orchestration/UI are implemented. P2.2 includes ServiceAccount authentication and frontend Token support; resource authorization, tenant isolation, API keys, and auditing remain pending. P2.3 now includes the global webhook MVP; real-cluster validation remains pending. See [project status](docs/PROJECT_STATUS.md) for current checks and validation limits.
 
 ## Features
 
@@ -38,6 +38,7 @@ Status (2026-10-20): P2.0 same-port packaging and P2.1 Workflow orchestration/UI
 - **Web UI (bundled with the image)**: Vue 3 + Vite + native SVG charts with dashboard, task management, live logs, and workflow list/detail pages; Dagre lays out DAGs with status colors, zoom, node inspection, and child Task/log links; the Dockerfile builds the frontend automatically, so no separate deployment is needed
 - **SSE streaming logs**: reads Job Pod logs in real time through the Kubernetes API with `tail`, `sinceSeconds`, and `follow` support
 - **Configuration**: environment variables > YAML > defaults (Viper, `KUBETASK_` prefix); explicit authentication flags override environment variables
+- **Global webhook**: optional JSON notifications for Task execution failures/timeouts, with Workflow child context, an asynchronous queue, deduplication and bounded retries; best-effort delivery
 - **Optional authentication**: ServiceAccount TokenReview and Bearer headers; in-memory UI Token settings support HTTP and fetch SSE; resource authorization remains pending
 - **Structured logging**: Zap with console / JSON formats
 - **Observability**: controller-runtime metrics, `/healthz` health check, `/readyz` readiness check
@@ -360,6 +361,10 @@ enable-http2: false
 web-dir: /web/dist      # Web UI static directory (default inside the image)
 auth-enabled: false    # Require ServiceAccount Bearer tokens for the API when enabled
 auth-audience: ""      # Required when authentication is enabled, e.g. kubetask
+webhook-enabled: false
+webhook-url: ""        # Required when enabled; can be injected from a Secret through the environment
+webhook-timeout: 5s
+webhook-max-retries: 3  # Retries after the first attempt
 ```
 
 | Key | Env var | Default | Description |
@@ -369,6 +374,10 @@ auth-audience: ""      # Required when authentication is enabled, e.g. kubetask
 | `web-dir` | `KUBETASK_WEB_DIR` | `/web/dist` | Web UI static directory; when missing, only the UI is disabled and the API keeps running |
 | `auth-enabled` | `KUBETASK_AUTH_ENABLED` | `false` | Enable ServiceAccount authentication for the HTTP API; also supports `--auth-enabled` |
 | `auth-audience` | `KUBETASK_AUTH_AUDIENCE` | Empty string | Expected token audience, required when enabled; also supports `--auth-audience` |
+| `webhook-enabled` | `KUBETASK_WEBHOOK_ENABLED` | `false` | Enable global Task failure/timeout notifications |
+| `webhook-url` | `KUBETASK_WEBHOOK_URL` | Empty string | HTTP(S) receiver URL without userinfo or fragment |
+| `webhook-timeout` | `KUBETASK_WEBHOOK_TIMEOUT` | `5s` | Total timeout per request, from 1 to 30 seconds |
+| `webhook-max-retries` | `KUBETASK_WEBHOOK_MAX_RETRIES` | `3` | Additional retries, from 0 to 5; at most four attempts by default |
 | `log-level` | `KUBETASK_LOG_LEVEL` | `info` | Log level |
 | `log-format` | `KUBETASK_LOG_FORMAT` | `console` | Log format |
 | `metrics-bind-address` | `KUBETASK_METRICS_BIND_ADDRESS` | `:8443` | Metrics address |
@@ -387,6 +396,20 @@ Replacing or clearing a token cancels old requests and reloads the current view.
 403/503 responses keep the credential. See the
 [API documentation](docs/API.md#11-认证配置与路由接入) for configuration, responses, and authorization boundaries.
 
+The global webhook emits `task.failed` for a terminal Job failure and `task.timeout` for `DeadlineExceeded`. Pod retries, success, deletion, and validation failures without a Job produce no notification. Initial synchronization skips historical failures; restarting does not backfill them. Queue overflow, shutdown, or exhausted retries may lose events; receivers should deduplicate by `eventId`. Workflow summaries, robot-specific formats, signatures and custom authentication headers are outside this MVP. See the [P2.3 design](PROJECT_PLAN.md#全局通用-webhook-mvp2026-10-26-定案) for the protocol and delivery limits.
+
+Helm reads the receiver URL from an existing Secret in the release namespace:
+
+```bash
+kubectl -n default create secret generic kubetask-webhook \
+  --from-literal=url='https://example.com/hooks/kubetask'
+helm upgrade --install kubetask ./charts/kubetask --namespace default \
+  --set webhook.enabled=true \
+  --set webhook.existingSecret.name=kubetask-webhook
+```
+
+The default Secret key is `url`; override it with `webhook.existingSecret.key`. The chart does not create the Secret. Restart Pods after configuration changes and use a newly built image containing this implementation; the chart's default image tag remains `v0.1.0`.
+
 ## Project Structure
 
 ```
@@ -401,6 +424,7 @@ kubetask/
 │   ├── config/                     # Viper: env > YAML > defaults; explicit auth flags override env
 │   ├── logger/                     # Zap structured logging
 │   ├── auth/                       # ServiceAccount TokenReview authentication
+│   ├── notification/               # Job failure observation and global webhook delivery
 │   ├── naming/                     # Shared Task name length limit
 │   ├── controller/                 # Task / Workflow Reconciler + envtest suites
 │   ├── workflow/                   # DAG validation / topological order / levels (pure logic + unit tests)
