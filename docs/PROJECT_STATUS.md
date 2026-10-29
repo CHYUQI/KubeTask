@@ -1,5 +1,13 @@
 # KubeTask 项目状态
 
+## 2026-10-25 资源授权校验器基础
+
+- 基于本地 `main`、HEAD `bc442e9` 开始，初始工作区干净。本轮新增 `internal/auth/authorization.go` 与对应单元测试：`ResourceAuthorizer` 接收已认证的完整 `UserInfo` 和实际资源操作属性，调用 Kubernetes `SubjectAccessReview`；保留用户名、UID、Groups、Extra，以及 Namespace、Group、Version、Resource、Subresource、Name、Verb 等属性，不从 ServiceAccount 所属 Namespace 推导资源范围。
+- 明确允许返回成功，明确拒绝或无决定且无错误返回 `ErrForbidden`；API 调用失败、空响应、矛盾结果或无决定且存在 EvaluationError 返回 `ErrAuthorizationUnavailable`，底层调用错误支持 `errors.Is`。按 Kubernetes API 定义，EvaluationError 可以与有效授权决定并存；不透传审查结果中的 Reason / EvaluationError。缺失身份复用 `ErrUnauthenticated`，缺失 resource / verb 提前拒绝审查。
+- 新增六组单元测试，覆盖完整身份与资源属性、集群级 Task、status 子资源、指定 Namespace 的 Pod 日志、允许/拒绝/无决定/部分评估错误、输入缺失、调用失败、空响应及 context 超时。新测试使用 SubjectAccessReview 替身，尚未用该组件完成真实 RBAC 联调。
+- Go 1.27.3 下顺序执行 `go build ./...`、`go vet ./...`、controller-gen v0.21.0、生成后编译及设置绝对 Kubernetes 1.35.0 envtest 路径的 `go test ./... -count=1`，全部通过；生成物无内容差异，最终 `git diff --check` 通过。默认测试仍不包含 Kind e2e 和 Token 自然过期慢测。
+- 此组件尚未接入 HTTP 中间件、路由或启动配置，现有 API 仍仅验证身份，未开始按调用者权限拒绝资源操作。未修改 CRD、部署权限或前端；Namespace 隔离、API Key、审计仍待后续独立推进。
+
 ## 2026-10-24 品牌字号比例调整
 
 - 参考 [Apple HIG Typography](https://developer.apple.com/design/human-interface-guidelines/typography) 关于可读性、字号/字重层级和系统字体的原则，将 KubeTask 品牌字号由 20px 调整为 1.75rem（默认 28px），600px 以下为 1.5rem（默认 24px）；字重统一为 600，行高 1.2，字距 -0.025em。具体数值是当前 Web 布局的适配选择，并非 Apple 对网页品牌字的规定值。Tab 及页面原有字号保持不变。
