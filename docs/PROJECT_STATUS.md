@@ -1,5 +1,22 @@
 # KubeTask 项目状态
 
+## 2026-10-28 Webhook MVP 提交前复核
+
+- 复核通知观察、终态分类、队列/去重/重试、取消、配置脱敏与 Helm Secret 接入，未发现阻塞提交的问题；实现范围与 2026-10-26 定案一致。
+- Linux / Go 1.27.3 / envtest Kubernetes 1.35.0 下重新运行编译、vet、默认全量测试及通知/配置包 race 检查，全部通过；`git diff --check` 通过，CRD/RBAC/DeepCopy 与 go.sum 无变化。
+- 本次未重复镜像构建、真实 Pod 或 Helm 安装，真实集群验收仍待完成；提交到独立功能分支，不表示已发布。
+
+## 2026-10-26 全局通用 Webhook MVP
+
+- 基于 HEAD `bc442e9` 加本轮工作区，实现单地址、固定 JSON 的 Task 执行失败/超时通知。审核后的设计、协议、配置与真实集群待验收步骤直接写入 [PROJECT_PLAN.md 的 P2.3](../PROJECT_PLAN.md#全局通用-webhook-mvp2026-10-26-定案)，未新建设计文档。
+- `internal/notification` 独立观察 Job informer，校验 controller OwnerReference；仅 JobFailed=True 生成事件，DeadlineExceeded 分类为 task.timeout。Workflow 子任务附带可获取的工作流与节点上下文；不修改 Task / Workflow CRD、Reconcile、执行历史和 HTTP 业务路由。
+- 使用 128 条等待队列、2 个 worker、按 Job UID 派生的 eventId 去重；已完成记录最多 4096 条、24 小时。默认每次 HTTP 请求超时 5 秒，最多额外重试三次，退避 1/2/4 秒。2xx 成功，网络错误/超时/429/5xx 重试，其他 4xx 与 3xx 停止，不跟随重定向。
+- 首次同步跳过既有失败；重启不补发历史。队列满、进程关闭、观察前资源被清理或重试耗尽时可能丢失；响应丢失、记录淘汰等情况下可能重复，接收方需按 eventId 去重。模块随 Manager Leader Election 启停，关闭时取消在途请求与退避。
+- 默认关闭；新增 webhook-enabled/url/timeout/max-retries 的 YAML / 环境变量配置及参数校验。URL 错误和网络错误不回显完整地址；Helm 通过已有 Secret 的 secretKeyRef 注入 URL，不代建 Secret、不增加 Secret API 权限。中英文 README 与 AGENTS.md 同步了使用方法及运行边界；Chart/image 默认标签仍为 v0.1.0，部署需使用新构建镜像。
+- 本次环境为 Linux amd64、Go 1.27.3、controller-gen v0.21.0、envtest Kubernetes 1.35.0、Helm v3.19.0。Go 编译 / vet / controller-gen / 生成后编译 / 默认全量测试通过，生成物无差异；通知和配置包 race 检查通过；含 logcheck 的 golangci-lint v2.15.0 检查为 0 issues。go mod tidy 仅将已存在的 logr v1.4.3 标为直接依赖，无版本升级、go.sum 无变化。
+- 单元测试覆盖失败/超时/Pod 重试识别、UTF-8 消息截断、Task UID 匹配与删除降级、并发去重、队列容量/缓存淘汰、HTTP 稳定内容/重试/拒绝/超时/取消及 URL 脱敏。真实 Manager + informer 的 envtest 验证首次同步基线、实时失败、暂停的 Workflow 子任务上下文以及重启不补发；Job 状态由测试注入，未执行真实 Pod。
+- Helm lint 和默认关闭、Secret 名称/key 引用、零重试值、缺少 Secret 名称时拒绝渲染检查通过；未执行真实集群/Pod、镜像构建或 Helm 安装验收。本次无前端改动，未重复前端构建；默认 Go 测试不含 Kind e2e 与 Token 自然过期慢测。
+
 ## 2026-10-25 资源授权校验器基础
 
 - 基于本地 `main`、HEAD `bc442e9` 开始，初始工作区干净。本轮新增 `internal/auth/authorization.go` 与对应单元测试：`ResourceAuthorizer` 接收已认证的完整 `UserInfo` 和实际资源操作属性，调用 Kubernetes `SubjectAccessReview`；保留用户名、UID、Groups、Extra，以及 Namespace、Group、Version、Resource、Subresource、Name、Verb 等属性，不从 ServiceAccount 所属 Namespace 推导资源范围。
@@ -96,7 +113,8 @@
 | P2.2 身份认证 | 可选 ServiceAccount TokenReview；显式认证 Flag / 环境变量 / YAML；默认关闭 | `internal/auth/`、`internal/api/middleware/auth.go`、`internal/config/config.go`、`cmd/main.go` |
 | P2.2 前端接入 | 内存 Token 设置/清除；普通 API 与 fetch SSE 使用 Authorization；旧请求取消与错误提示 | `web/src/api/{auth,http,index,logs}.js`、`AuthenticationPanel.vue` |
 | P2.2 未完成 | 调用者 RBAC 资源授权、Namespace 隔离、API Key、操作审计 | 当前只挂载认证中间件，无资源授权层 |
-| P2.3 / P2.4 | 通知渠道、资源感知调度待实现；Job deadline 与 Cron 并发策略已有 | Controller 与计划书对照 |
+| P2.3 | 全局 Webhook MVP 已实现；机器人渠道、模板与 Workflow 汇总待实现，真实集群待验收 | `internal/notification/`、配置与 Helm；详见 2026-10-26 记录 |
+| P2.4 | 资源感知调度待实现；Job deadline 与 Cron 并发策略已有 | Controller 与计划书对照 |
 | P3 | 多集群、错峰预测、业务指标/Grafana、Serverless 为规划 | 当前无对应执行模块；clusterName / database 配置仅预留 |
 
 ## 本次检查结果

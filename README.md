@@ -8,7 +8,7 @@ KubeTask 用自定义资源（CRD）描述任务与工作流：`Task` 由 Contro
 
 > 定位：轻量、可扩展、易部署，适用于中小团队、边缘计算（k3s）与云原生学习实践。
 
-当前状态（2026-10-20）：P2.0 同端口打包、P2.1 Workflow 编排与视图已实现；P2.2 已完成 ServiceAccount 身份认证和前端 Token 接入，资源授权、租户隔离、API Key、审计仍待实现。当前工作区检查结果及验收边界见 [项目状态](docs/PROJECT_STATUS.md)。
+当前状态（2026-10-26）：P2.0 同端口打包、P2.1 Workflow 编排与视图已实现；P2.2 已完成 ServiceAccount 身份认证和前端 Token 接入，资源授权、租户隔离、API Key、审计仍待实现；P2.3 已实现全局 Webhook MVP，真实集群验收待完成。当前工作区检查结果及验收边界见 [项目状态](docs/PROJECT_STATUS.md)。
 
 ## 功能特性
 
@@ -39,6 +39,7 @@ KubeTask 用自定义资源（CRD）描述任务与工作流：`Task` 由 Contro
 - **SSE 流式日志**：通过 Kubernetes API 实时读取 Job Pod 日志，支持 `tail`、`sinceSeconds`、`follow`
 - **配置管理**：环境变量 > YAML > 默认值（Viper，`KUBETASK_` 前缀），认证项额外支持显式 Flag 覆盖
 - **可选身份认证**：ServiceAccount TokenReview + Bearer 请求头，Web UI 在内存中设置/清除 Token，兼容普通 API 和 fetch SSE；资源授权待实现
+- **全局 Webhook**：可选的 Task 执行失败/超时 JSON 通知，包含 Workflow 子任务上下文；异步队列、去重与有限重试，尽力投递
 - **结构化日志**：Zap，支持 console / JSON 格式
 - **可观测性**：controller-runtime Metrics、健康检查 `/healthz`、就绪检查 `/readyz`
 - **Standalone 模式**：未开启认证且无法加载 Kubernetes 配置时，仅 `/healthz` 返回 200，其余请求返回 503 提示
@@ -361,6 +362,10 @@ enable-http2: false
 web-dir: /web/dist      # Web UI 静态资源目录（容器内默认）
 auth-enabled: false    # 开启后 API 要求 ServiceAccount Bearer Token
 auth-audience: ""      # 开启认证时必须显式指定，例如 kubetask
+webhook-enabled: false
+webhook-url: ""        # 开启时必填，也可通过环境变量从 Secret 注入
+webhook-timeout: 5s
+webhook-max-retries: 3  # 首次请求之外最多重试三次
 ```
 
 | 配置项 | 环境变量 | 默认值 | 说明 |
@@ -370,6 +375,10 @@ auth-audience: ""      # 开启认证时必须显式指定，例如 kubetask
 | `web-dir` | `KUBETASK_WEB_DIR` | `/web/dist` | Web UI 静态资源目录；不存在时仅禁用 UI，不影响 API |
 | `auth-enabled` | `KUBETASK_AUTH_ENABLED` | `false` | 开启 HTTP API 的 ServiceAccount 身份认证；也支持 `--auth-enabled` |
 | `auth-audience` | `KUBETASK_AUTH_AUDIENCE` | 空字符串 | 预期 Token audience，开启时必填；也支持 `--auth-audience` |
+| `webhook-enabled` | `KUBETASK_WEBHOOK_ENABLED` | `false` | 开启全局 Task 失败/超时通知 |
+| `webhook-url` | `KUBETASK_WEBHOOK_URL` | 空字符串 | HTTP(S) 接收地址；不接受 userinfo / fragment |
+| `webhook-timeout` | `KUBETASK_WEBHOOK_TIMEOUT` | `5s` | 单次请求总超时，1–30 秒 |
+| `webhook-max-retries` | `KUBETASK_WEBHOOK_MAX_RETRIES` | `3` | 额外重试次数，0–5；默认共最多四次请求 |
 | `log-level` | `KUBETASK_LOG_LEVEL` | `info` | 日志级别 |
 | `log-format` | `KUBETASK_LOG_FORMAT` | `console` | 日志格式 |
 | `metrics-bind-address` | `KUBETASK_METRICS_BIND_ADDRESS` | `:8443` | Metrics 地址 |
@@ -387,6 +396,20 @@ Authorization 请求头发送。Token 仅保存在当前页面内存，刷新后
 关闭旧请求并重新加载当前视图。401 提示重新设置 Token，403/503 不清除凭据。认证配置、错误响应与授权边界见
 [API 文档](docs/API.md#11-认证配置与路由接入)。
 
+全局 Webhook 在 Job 最终失败时发送 `task.failed`，`DeadlineExceeded` 发送 `task.timeout`；Pod 重试、成功、删除与未创建 Job 的参数错误不发送。首次同步中的旧失败会跳过，重启不补发历史。队列满、进程退出或重试耗尽时可能丢失，接收方应按 `eventId` 去重；本次不提供 Workflow 整体汇总、机器人格式、签名或自定义认证头。协议与运行边界见 [P2.3 方案](PROJECT_PLAN.md#全局通用-webhook-mvp2026-10-26-定案)。
+
+Helm 使用同一命名空间中的已有 Secret 注入地址，例如：
+
+```bash
+kubectl -n default create secret generic kubetask-webhook \
+  --from-literal=url='https://example.com/hooks/kubetask'
+helm upgrade --install kubetask ./charts/kubetask --namespace default \
+  --set webhook.enabled=true \
+  --set webhook.existingSecret.name=kubetask-webhook
+```
+
+Secret 默认 key 为 `url`，可用 `webhook.existingSecret.key` 修改；Chart 不代建 Secret。配置变更后重启 Pod，已有部署也需要先使用包含通知实现的新构建镜像，Chart 默认镜像标签仍是 `v0.1.0`。
+
 ## 项目结构
 
 ```
@@ -401,6 +424,7 @@ kubetask/
 │   ├── config/                     # Viper：环境变量 > YAML > 默认值，认证支持显式 Flag
 │   ├── logger/                     # Zap 结构化日志
 │   ├── auth/                       # ServiceAccount TokenReview 身份认证
+│   ├── notification/               # Job 失败观察、全局 Webhook 队列与投递
 │   ├── naming/                     # Task 名称长度唯一常量
 │   ├── controller/                 # Task / Workflow Reconciler + envtest 测试
 │   ├── workflow/                   # DAG 校验 / 拓扑排序 / 并行分层（纯逻辑包 + 单元测试）

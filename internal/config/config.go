@@ -3,7 +3,9 @@ package config
 import (
 	"flag"
 	"fmt"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -24,6 +26,11 @@ type Config struct {
 
 	AuthEnabled  bool   `mapstructure:"auth-enabled"`
 	AuthAudience string `mapstructure:"auth-audience"`
+
+	WebhookEnabled    bool          `mapstructure:"webhook-enabled"`
+	WebhookURL        string        `mapstructure:"webhook-url"`
+	WebhookTimeout    time.Duration `mapstructure:"webhook-timeout"`
+	WebhookMaxRetries int           `mapstructure:"webhook-max-retries"`
 
 	DatabaseHost     string `mapstructure:"database-host"`
 	DatabasePort     int    `mapstructure:"database-port"`
@@ -55,6 +62,11 @@ func LoadConfig(configFile string, flags *flag.FlagSet) (*Config, error) {
 
 	v.SetDefault("auth-enabled", false)
 	v.SetDefault("auth-audience", "")
+
+	v.SetDefault("webhook-enabled", false)
+	v.SetDefault("webhook-url", "")
+	v.SetDefault("webhook-timeout", "5s")
+	v.SetDefault("webhook-max-retries", 3)
 
 	v.SetDefault("database-host", "localhost")
 	v.SetDefault("database-port", 5432)
@@ -91,6 +103,10 @@ func LoadConfig(configFile string, flags *flag.FlagSet) (*Config, error) {
 		})
 	}
 
+	if _, ok := v.Get("webhook-url").(string); !ok {
+		// Do not let mapstructure include a secret-bearing value in its error.
+		return nil, fmt.Errorf("webhook-url must be a string")
+	}
 	cfg := &Config{}
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
@@ -100,7 +116,30 @@ func LoadConfig(configFile string, flags *flag.FlagSet) (*Config, error) {
 	if cfg.AuthEnabled && cfg.AuthAudience == "" {
 		return nil, fmt.Errorf("auth-audience is required when auth-enabled is true")
 	}
+	if err := cfg.validateWebhook(); err != nil {
+		return nil, err
+	}
 
 	cfg.ConfigFile = v.ConfigFileUsed()
 	return cfg, nil
+}
+
+func (c *Config) validateWebhook() error {
+	if !c.WebhookEnabled {
+		return nil
+	}
+	c.WebhookURL = strings.TrimSpace(c.WebhookURL)
+	u, err := url.Parse(c.WebhookURL)
+	if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") ||
+		u.User != nil || strings.Contains(c.WebhookURL, "#") {
+		// URL parsing errors can contain credentials from the original address.
+		return fmt.Errorf("webhook-url must be an HTTP(S) URL with a host and without userinfo or fragment")
+	}
+	if c.WebhookTimeout < time.Second || c.WebhookTimeout > 30*time.Second {
+		return fmt.Errorf("webhook-timeout must be between 1s and 30s")
+	}
+	if c.WebhookMaxRetries < 0 || c.WebhookMaxRetries > 5 {
+		return fmt.Errorf("webhook-max-retries must be between 0 and 5")
+	}
+	return nil
 }

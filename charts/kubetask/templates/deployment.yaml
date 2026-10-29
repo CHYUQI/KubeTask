@@ -36,6 +36,13 @@ spec:
             value: {{ .Values.config.logLevel | quote }}
           - name: KUBETASK_LOG_FORMAT
             value: {{ .Values.config.logFormat | quote }}
+          {{- if .Values.webhook.enabled }}
+          - name: KUBETASK_WEBHOOK_URL
+            valueFrom:
+              secretKeyRef:
+                name: {{ required "webhook.existingSecret.name is required when webhook.enabled is true" .Values.webhook.existingSecret.name | quote }}
+                key: {{ required "webhook.existingSecret.key is required when webhook.enabled is true" .Values.webhook.existingSecret.key | quote }}
+          {{- end }}
         volumeMounts:
           - name: config
             mountPath: /etc/kubetask
