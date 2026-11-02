@@ -114,9 +114,8 @@ func (h *LogHandler) Stream(c *gin.Context) {
 			}
 			c.Writer.Flush()
 		}
-		if !follow {
-			return false
-		}
-		return scanner.Err() == nil
+		// EOF ends this Pod log response, including follow requests. Returning
+		// true would immediately rescan the exhausted stream in a busy loop.
+		return false
 	})
 }
