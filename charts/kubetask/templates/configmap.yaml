@@ -1,3 +1,7 @@
+{{- $authAudience := trim .Values.auth.audience -}}
+{{- if .Values.auth.enabled -}}
+{{- $authAudience = required "auth.audience is required when auth.enabled is true" $authAudience -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -10,6 +14,8 @@ data:
     log-format: {{ .Values.config.logFormat }}
     api-port: {{ .Values.api.port }}
     api-host: {{ .Values.api.host }}
+    auth-enabled: {{ .Values.auth.enabled }}
+    auth-audience: {{ $authAudience | quote }}
     webhook-enabled: {{ .Values.webhook.enabled }}
     webhook-timeout: {{ .Values.webhook.timeout | quote }}
     webhook-max-retries: {{ .Values.webhook.maxRetries }}

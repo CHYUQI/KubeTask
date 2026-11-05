@@ -16,6 +16,11 @@ config:
   logLevel: info
   logFormat: json
 
+auth:
+  enabled: false
+  # Required when enabled; use the same audience when issuing caller tokens.
+  audience: ""
+
 # URL is injected from an existing Secret; restart Pods after changing it.
 webhook:
   enabled: false
@@ -39,6 +44,7 @@ ingress:
   host: kubetask.local
 
 serviceAccount:
+  # With an existing account, grant the controller and review permissions separately.
   create: true
   name: ""
 
