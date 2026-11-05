@@ -26,6 +26,7 @@ type Config struct {
 
 	AuthEnabled            bool   `mapstructure:"auth-enabled"`
 	AuthAudience           string `mapstructure:"auth-audience"`
+	AuthAPIKeysFile        string `mapstructure:"auth-api-keys-file"`
 	TenantIsolationEnabled bool   `mapstructure:"tenant-isolation-enabled"`
 
 	WebhookEnabled    bool          `mapstructure:"webhook-enabled"`
@@ -63,6 +64,7 @@ func LoadConfig(configFile string, flags *flag.FlagSet) (*Config, error) {
 
 	v.SetDefault("auth-enabled", false)
 	v.SetDefault("auth-audience", "")
+	v.SetDefault("auth-api-keys-file", "")
 	v.SetDefault("tenant-isolation-enabled", false)
 
 	v.SetDefault("webhook-enabled", false)
@@ -120,6 +122,9 @@ func LoadConfig(configFile string, flags *flag.FlagSet) (*Config, error) {
 	}
 	if cfg.TenantIsolationEnabled && !cfg.AuthEnabled {
 		return nil, fmt.Errorf("tenant-isolation-enabled requires auth-enabled")
+	}
+	if cfg.AuthAPIKeysFile != "" && !cfg.AuthEnabled {
+		return nil, fmt.Errorf("auth-api-keys-file requires auth-enabled")
 	}
 	if err := cfg.validateWebhook(); err != nil {
 		return nil, err

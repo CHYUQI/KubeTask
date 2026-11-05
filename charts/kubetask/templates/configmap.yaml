@@ -5,6 +5,9 @@
 {{- if and .Values.auth.tenantIsolation (not .Values.auth.enabled) -}}
 {{- fail "auth.tenantIsolation requires auth.enabled" -}}
 {{- end -}}
+{{- if and .Values.auth.apiKeys.existingSecret.name (not .Values.auth.enabled) -}}
+{{- fail "auth.apiKeys.existingSecret.name requires auth.enabled" -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -20,6 +23,9 @@ data:
     auth-enabled: {{ .Values.auth.enabled }}
     auth-audience: {{ $authAudience | quote }}
     tenant-isolation-enabled: {{ .Values.auth.tenantIsolation }}
+    {{- if .Values.auth.apiKeys.existingSecret.name }}
+    auth-api-keys-file: "/etc/kubetask-keys/keys.json"
+    {{- end }}
     webhook-enabled: {{ .Values.webhook.enabled }}
     webhook-timeout: {{ .Values.webhook.timeout | quote }}
     webhook-max-retries: {{ .Values.webhook.maxRetries }}

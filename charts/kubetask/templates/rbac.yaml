@@ -20,6 +20,11 @@ rules:
   - apiGroups: ["authorization.k8s.io"]
     resources: ["subjectaccessreviews"]
     verbs: ["create"]
+  {{- if .Values.auth.apiKeys.existingSecret.name }}
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get"]
+  {{- end }}
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]

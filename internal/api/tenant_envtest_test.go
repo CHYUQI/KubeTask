@@ -2,9 +2,12 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -115,5 +118,26 @@ func testTenantBoundary(
 		if w.Code != tt.status || !strings.Contains(w.Body.String(), tt.contains) {
 			t.Errorf("%s %s: status %d, body %s; want %d and %q", tt.method, tt.path, w.Code, w.Body.String(), tt.status, tt.contains)
 		}
+	}
+	accountObject, err := admin.CoreV1().ServiceAccounts(namespace).Get(ctx, account, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "ktk_" + strings.Repeat("a", 64)
+	keysPath := filepath.Join(t.TempDir(), "keys.json")
+	bindings := fmt.Appendf(nil, `[{"id":"ci","sha256":"%x","namespace":%q,"serviceAccount":%q,"uid":%q}]`,
+		sha256.Sum256([]byte(key)), namespace, account, accountObject.UID)
+	if err := os.WriteFile(keysPath, bindings, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keys := auth.NewAPIKeyAuthenticator(authenticator, admin.CoreV1(), keysPath)
+	router = NewRouter(k8sClient, admin, "", middleware.Authentication(keys), middleware.TenantIsolation(),
+		middleware.Authorization(authorizer))
+	token = key
+	if w := request(ctx, http.MethodGet, tasksPath, ""); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), ownerLabel) {
+		t.Errorf("API Key did not receive its ServiceAccount tenant access: %d %s", w.Code, w.Body.String())
+	}
+	if w := request(ctx, http.MethodGet, tasksPath+"/"+foreignTask.Name, ""); w.Code != http.StatusNotFound {
+		t.Errorf("API Key must not see another tenant's Task, got %d", w.Code)
 	}
 }

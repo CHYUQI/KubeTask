@@ -49,6 +49,11 @@ spec:
           - name: config
             mountPath: /etc/kubetask
             readOnly: true
+          {{- if .Values.auth.apiKeys.existingSecret.name }}
+          - name: api-keys
+            mountPath: /etc/kubetask-keys
+            readOnly: true
+          {{- end }}
         livenessProbe:
           httpGet:
             path: /healthz
@@ -67,3 +72,11 @@ spec:
         - name: config
           configMap:
             name: {{ include "kubetask.fullname" . }}-config
+        {{- if .Values.auth.apiKeys.existingSecret.name }}
+        - name: api-keys
+          secret:
+            secretName: {{ .Values.auth.apiKeys.existingSecret.name | quote }}
+            items:
+              - key: {{ .Values.auth.apiKeys.existingSecret.key | quote }}
+                path: keys.json
+        {{- end }}
