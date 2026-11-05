@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,11 +33,15 @@ func TestAuthenticatedLogStreamContinuesAfterAuthenticationTimeout(t *testing.T)
 	second := make(chan struct{})
 	upstreamDone := make(chan struct{})
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer close(upstreamDone)
 		if r.URL.Path != "/api/v1/namespaces/default/pods/stream-pod/log" || r.URL.Query().Get("follow") != "true" {
 			t.Error("unexpected upstream log request")
 		}
 		w.Header().Set("Content-Type", "text/plain")
+		if r.URL.Query().Get("tailLines") == "1" {
+			_, _ = fmt.Fprintln(w, "final")
+			return
+		}
+		defer close(upstreamDone)
 		_, _ = fmt.Fprintln(w, "first")
 		w.(http.Flusher).Flush()
 		select {
@@ -128,4 +133,22 @@ func TestAuthenticatedLogStreamContinuesAfterAuthenticationTimeout(t *testing.T)
 	case <-time.After(2 * time.Second):
 		t.Error("client cancellation did not close the upstream log request")
 	}
+	t.Run("follow ends at upstream EOF", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/api/v1/tasks/stream-task/logs?follow=true&tail=1", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer opaque-token")
+		resp, err := server.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil || resp.StatusCode != http.StatusOK || string(body) != "data: final\n\n" {
+			t.Fatalf("expected final event and natural EOF; status %d, body %q, error %v", resp.StatusCode, body, err)
+		}
+	})
 }

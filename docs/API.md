@@ -703,6 +703,9 @@ data: task completed
 
 ```
 
+`follow=true` 跟踪当前 Pod 的日志；上游日志流正常结束（EOF）时，SSE 响应也结束。
+客户端保留已收到的日志；此连接不等待或自动切换到该 Task 的后续执行。
+
 使用 `curl` 查看：
 
 ```bash

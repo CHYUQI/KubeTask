@@ -9,6 +9,15 @@
 - Windows Go 1.27.3 下编译、vet、controller-gen v0.21.0、生成后编译通过；默认测试中两个包首次链接遇到 C 盘空间不足，改用 D 盘临时目录补跑通过，其余包在首次运行通过。复用本地 Kubernetes 1.35.0 envtest，覆盖租户 RoleBinding / 跨租户拒绝 / Workflow Job 落位、API Key 租户访问，以及成功与拒绝各落一条真实 Event。API Key 撤销及账号 UID 变化由单元测试验证。
 - Helm lint、默认/全功能渲染及 `git diff --check` 通过；CRD、DeepCopy、PROJECT、go.mod/go.sum 无差异。未执行 ECS、真实集群部署或 Helm 安装，不含 Kind e2e 与自然过期慢测。本次启用方法及边界见 [API 文档](API.md#11-认证配置与路由接入)。
 
+## 2026-11-02 修复 Pod 日志 SSE EOF 空转
+
+- 日志扫描结束后终止 SSE 响应，避免 follow=true 在正常 EOF 后循环重读；实时输出、认证 context 与客户端取消路径保留。API 文档明确连接仅跟踪当前 Pod。
+- 新增 `test/integration/log_stream_real.py`：在真实集群创建临时 ServiceAccount 和真实 Pod，用实际 token 校验历史日志两种 follow 模式与实时日志都自然 EOF；不使用 envtest 或注入 Job 状态。脚本需显式传入 manager 路径、可用 kubeconfig 和具有创建测试资源权限的 kubectl。
+- 同一真实集群回归在修复前的 follow=true 请求上读取超时；修复后历史 follow=true 约 0.006 秒自然 EOF，实时流约 8.355 秒自然 EOF，跨过 3 秒认证窗口。保持终态连接时进程 CPU 从修复前 191.0% 降至 0.0%（3 秒采样）。原始集群快照和详细运行证据仅保留本地，不发布到仓库。
+- Go 1.27.3 下编译、vet、controller-gen v0.21.0、生成后编译及 Kubernetes v1.35.0 envtest 的默认全量 Go 测试通过；生成物无内容变化，git diff --check 通过。默认 envtest 回归与上述真实 Pod 验收分别执行。本次未重复完整 webhook/token 场景矩阵、浏览器或 Helm 安装。
+
+2026-11-05 合并复验（本地 `f59d585` 与远端 `58fb3ed`）：保留租户 Namespace、Job/Pod OwnerReference 和实际 `pods/log get` 授权。复用本地 SSE 连接测试，验证跨过认证超时后仍能接收日志、客户端取消能关闭上游、`follow=true` 收到最后事件后自然 EOF。真实集群脚本补齐临时 Task/Pod 日志 RBAC 及清理步骤；本轮只验证 Python 语法，未重跑真实集群。Windows 编译、vet、生成、生成后编译、Kubernetes 1.35.0 envtest 默认全量测试均通过，生成物无差异。
+
 ## 2026-11-01 业务 API 接入 RBAC
 
 - 基于本地 `main`、HEAD `87446ff`，初始工作区干净。启动链在 `auth-enabled=true` 时顺序挂载身份认证与资源授权，全部 15 个业务接口使用已有 `ResourceAuthorizer` 检查调用者权限；关闭时保留匿名模式。只有有效 Token、没有相应角色的账号现在返回通用 403，审查失败返回通用 503。新增路由未登记权限时拒绝执行。
