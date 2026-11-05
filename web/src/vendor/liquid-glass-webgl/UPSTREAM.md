@@ -6,6 +6,10 @@ Reference demo: https://glass.mt512.qzz.io/
 
 Pinned upstream commit: `0b90f9fc1cea8c7e59825f9aff1cbb96674b5b80`.
 
+Reviewed on 2026-11-05: the vendored implementation and license are unchanged
+in the current working tree. See the [integration record](../../../LIQUID_GLASS.md)
+for KubeTask's adapter and validation history.
+
 The retained renderer, shaders, helpers, and catalog sources are copied
 unchanged from this revision. The upstream license is included as `LICENSE`.
 

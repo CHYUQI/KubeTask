@@ -8,7 +8,7 @@ KubeTask 用自定义资源（CRD）描述任务与工作流：`Task` 由 Contro
 
 > 定位：轻量、可扩展、易部署，适用于中小团队、边缘计算（k3s）与云原生学习实践。
 
-当前状态（2026-11-05）：已实现 Workflow 编排与视图、Helm 认证配置、RBAC 授权、可选 Namespace 租户隔离、CI/CD API Key、Events 审计与全局 Webhook MVP。P2.2/P2.3 真实部署验收待完成；验证范围见 [项目状态](docs/PROJECT_STATUS.md)。
+当前工作区（2026-11-05）：已实现 Workflow 编排与视图、Helm 认证配置、RBAC 授权、可选 Namespace 租户隔离、CI/CD API Key、Events 审计与全局 Webhook MVP。P2.2/P2.3 的完整部署验收仍待完成；本地和远端跟踪分支的差异及验证范围见 [项目状态](docs/PROJECT_STATUS.md)。
 
 ## 功能特性
 
@@ -189,7 +189,7 @@ Vite 开发服务器运行在 `http://localhost:5173`，会自动将 `/api` 代�
 
 > Workflow 已提供 HTTP API（创建 / 列表 / 详情 / 删除），详情接口会返回前端 DAG 视图需要的节点、边、拓扑序与并行层。
 
-从侧栏「工作流列表」按状态筛选，点击名称进入详情。依赖图支持缩放、适应窗口和节点选择；失败分支使用虚线连接，节点可跳转到子 Task 和日志。运行中的详情默认每 5 秒刷新，终态停止自动请求，也可关闭自动刷新或手动刷新。工作流仍通过 API 或 `kubectl` 创建和删除。
+从顶部「工作流」进入列表，可按状态筛选，点击名称查看 DAG。依赖图支持缩放、适应窗口和节点选择；失败分支使用虚线连接，节点可跳转到子 Task 和日志。运行中的详情默认每 5 秒刷新，终态停止自动请求，也可关闭自动刷新或手动刷新。界面可创建工作流；删除使用 API 或 `kubectl`。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -342,7 +342,7 @@ spec:
 ## 配置
 
 配置通过 YAML 和环境变量（`KUBETASK_` 前缀）加载，环境变量优先于 YAML。
-新增的认证项还支持命令行参数，优先级为：显式 Flag > 环境变量 > YAML > 默认值。
+仅 `auth-enabled` 和 `auth-audience` 还支持显式命令行参数覆盖环境变量。
 既有的 `metrics-bind-address`、`leader-elect`、`health-probe-bind-address` 三项 Flag
 仍仅注册，未绑定到配置加载器。
 
@@ -375,8 +375,10 @@ webhook-max-retries: 3  # 首次请求之外最多重试三次
 | `api-host` | `KUBETASK_API_HOST` | `0.0.0.0` | HTTP 监听地址 |
 | `api-port` | `KUBETASK_API_PORT` | `8080` | HTTP 端口 |
 | `web-dir` | `KUBETASK_WEB_DIR` | `/web/dist` | Web UI 静态资源目录；不存在时仅禁用 UI，不影响 API |
-| `auth-enabled` | `KUBETASK_AUTH_ENABLED` | `false` | 同时开启 HTTP API 的 ServiceAccount 身份认证与 RBAC 授权；也支持 `--auth-enabled` |
+| `auth-enabled` | `KUBETASK_AUTH_ENABLED` | `false` | 开启 Bearer 认证、RBAC 授权及已认证写操作审计；也支持 `--auth-enabled` |
 | `auth-audience` | `KUBETASK_AUTH_AUDIENCE` | 空字符串 | 预期 Token audience，开启时必填；也支持 `--auth-audience` |
+| `tenant-isolation-enabled` | `KUBETASK_TENANT_ISOLATION_ENABLED` | `false` | 按可信身份的 Namespace 隔离 API 资源及 Job，依赖认证 |
+| `auth-api-keys-file` | `KUBETASK_AUTH_API_KEYS_FILE` | 空字符串 | CI API Key 的摘要及账号绑定文件路径，依赖认证 |
 | `webhook-enabled` | `KUBETASK_WEBHOOK_ENABLED` | `false` | 开启全局 Task 失败/超时通知 |
 | `webhook-url` | `KUBETASK_WEBHOOK_URL` | 空字符串 | HTTP(S) 接收地址；不接受 userinfo / fragment |
 | `webhook-timeout` | `KUBETASK_WEBHOOK_TIMEOUT` | `5s` | 单次请求总超时，1–30 秒 |
@@ -394,10 +396,12 @@ webhook-max-retries: 3  # 首次请求之外最多重试三次
 认证开关控制全部 `/api/v1` 端点，健康检查与静态资源保持公开。开启时无法加载
 Kubernetes 配置会直接退出；启动不主动探测审查权限，运行时审查失败返回 503。
 有效 Token 还需相应资源角色：缺少权限返回 403，绑定只读角色后可查看但不能修改任务。
-前端可在页面上方「设置 Token」输入 ServiceAccount Token；普通 API 与 SSE 日志均通过
+前端可在顶部「API 认证」输入 ServiceAccount Token；普通 API 与 SSE 日志均通过
 Authorization 请求头发送。Token 仅保存在当前页面内存，刷新后需重新输入；清除或更换会
 关闭旧请求并重新加载当前视图。401 提示重新设置 Token，403/503 不清除凭据。认证配置、错误响应与授权边界见
 [API 文档](docs/API.md#11-认证配置与路由接入)。
+
+Helm 通过 `auth.enabled` / `auth.audience` 开启访问控制，`auth.tenantIsolation` 另行开启租户隔离。CI 使用 `ktk_` Bearer Key；服务端通过 `auth.apiKeys.existingSecret` 挂载摘要绑定。Task 和 Workflow 名称仍全局唯一，旧资源不会自动迁移。
 
 全局 Webhook 在 Job 最终失败时发送 `task.failed`，`DeadlineExceeded` 发送 `task.timeout`；Pod 重试、成功、删除与未创建 Job 的参数错误不发送。首次同步中的旧失败会跳过，重启不补发历史。队列满、进程退出或重试耗尽时可能丢失，接收方应按 `eventId` 去重；本次不提供 Workflow 整体汇总、机器人格式、签名或自定义认证头。协议与运行边界见 [P2.3 方案](PROJECT_PLAN.md#全局通用-webhook-mvp2026-10-26-定案)。
 
@@ -426,7 +430,8 @@ kubetask/
 ├── internal/
 │   ├── config/                     # Viper：环境变量 > YAML > 默认值，认证支持显式 Flag
 │   ├── logger/                     # Zap 结构化日志
-│   ├── auth/                       # ServiceAccount TokenReview 身份认证
+│   ├── auth/                       # TokenReview、API Key 与 SubjectAccessReview
+│   ├── tenant/                     # 租户标签、请求范围与 Job 定位
 │   ├── notification/               # Job 失败观察、全局 Webhook 队列与投递
 │   ├── naming/                     # Task 名称长度唯一常量
 │   ├── controller/                 # Task / Workflow Reconciler + envtest 测试

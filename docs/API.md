@@ -36,8 +36,10 @@ auth-audience: kubetask
 
 | 配置项 | 命令行参数 | 环境变量 | 默认值 |
 | --- | --- | --- | --- |
-| `auth-enabled` | `--auth-enabled=true` / `--auth-enabled=false` | `KUBETASK_AUTH_ENABLED` | `false` |
+| `auth-enabled` | `--auth-enabled=true` / `--auth-enabled=false` | `KUBETASK_AUTH_ENABLED` | `false`（认证、授权及写操作审计均关闭） |
 | `auth-audience` | `--auth-audience=kubetask` | `KUBETASK_AUTH_AUDIENCE` | 空字符串 |
+| `tenant-isolation-enabled` | — | `KUBETASK_TENANT_ISOLATION_ENABLED` | `false`（开启时依赖认证） |
+| `auth-api-keys-file` | — | `KUBETASK_AUTH_API_KEYS_FILE` | 空字符串（配置路径时依赖认证） |
 
 只注册而未显式传入的 flag 默认值不会覆盖环境变量或 YAML；显式的
 `--auth-enabled=false` 可以覆盖其他来源的开启设置。audience 会去除首尾空白。
@@ -45,7 +47,8 @@ auth-audience: kubetask
 
 启动入口使用已有 Kubernetes 客户端的 `AuthenticationV1().TokenReviews()`
 构造身份校验器，并使用 `AuthorizationV1().SubjectAccessReviews()` 构造资源授权校验器。
-开启时按认证、授权顺序挂载中间件；关闭时两者均不挂载。构造时不发送审查请求；
+开启时顺序为认证 → 可选租户范围 → 审计 → 授权 → 业务处理；审计在后续处理返回后写 Event，
+因此能记录授权拒绝。关闭时这些中间件均不挂载。构造时不发送审查请求；
 运行时无法完成任一审查（包括后端缺少审查权限）返回通用 503，不会转为匿名处理。
 
 部署时，**后端进程使用的 Kubernetes 身份**必须有
@@ -96,11 +99,14 @@ ServiceAccount 已有两项审查权限；`serviceAccount.create=false` 时由�
 部署时需使用包含这些功能的新构建镜像；Chart 默认镜像标签仍为 `v0.1.0`。
 
 `NewRouter` 可接收可选的 Gin 中间件，并在注册端点前按传入顺序统一挂到
-`/api/v1` 路由组。自行构造 Router 时，须同时传入两个中间件以启用完整访问控制：
+`/api/v1` 路由组。自行构造 Router 时可参考 `cmd/main.go`。下面是开启租户隔离时的顺序；
+不启用租户隔离则省略 `TenantIsolation()`，`authenticator` 由启动入口按配置选择是否支持 API Key：
 
 ```go
 router := api.NewRouter(k8sClient, clientset, addr,
     middleware.Authentication(authenticator),
+    middleware.TenantIsolation(),
+    middleware.Audit(clientset.EventsV1()),
     middleware.Authorization(authorizer),
 )
 ```
@@ -118,7 +124,7 @@ router := api.NewRouter(k8sClient, clientset, addr,
 未开启租户隔离时，Task / Workflow 权限的 Namespace 为空。租户模式见第 1.3 节。
 
 **启用后的行为变化**：有效 Token 还必须有相应资源权限；只有 Token、没有角色绑定的账号会收到 403。
-前端在页面上方提供「设置 Token」入口，输入原始 ServiceAccount Token（不含 `Bearer` 前缀）。
+前端在顶部提供「API 认证」入口，输入原始 ServiceAccount Token（不含 `Bearer` 前缀）。CI 使用第 1.4 节的 API Key。
 普通 API 与 SSE 日志请求均通过 `Authorization` 请求头发送 Token，不放入 URL。
 Token 仅保存在当前页面内存中，不写入 localStorage/sessionStorage，刷新或关闭页面后需重新输入。
 未设置 Token 时保持匿名请求，兼容后端默认关闭认证的配置。
@@ -200,7 +206,7 @@ kubectl apply -f config/rbac/task_viewer_role.yaml
 kubectl -n team-a create rolebinding kubetask-task-reader --clusterrole=task-viewer-role --serviceaccount=team-a:ci
 ```
 
-KubeTask 用调用者 Namespace 审查资源权限，创建时设置 `kubetask.io/tenant` 标签。Task/Workflow 的列表、统计及按名访问均限制在本租户；RBAC 允许但资源属于其他租户时返回 404。Workflow 子 Task 继承租户，Job/Pod 在租户 Namespace，日志只定位对应执行资源。请求体不能指定或修改租户归属。
+KubeTask 用调用者 Namespace 审查资源权限，创建时设置 `kubetask.io/tenant` 标签，并丢弃租户模式下请求体自带的 OwnerReference。Task/Workflow 的列表、统计及按名访问均限制在本租户；RBAC 允许但资源属于其他租户时返回 404。Workflow 子 Task 继承租户，Job/Pod 在租户 Namespace，日志只定位对应执行资源。请求体不能指定或修改租户归属。
 
 Task / Workflow CRD 仍是集群级资源，名字仍全局唯一。该 RoleBinding 供 KubeTask 的 Namespace 审查使用，不会授予直接访问集群级 CR 的权限。租户不应另行获得绕过 KubeTask 的集群级 CR 写权限。无标签的旧资源不会自动迁移，开启隔离后不会出现在租户 API 中；删除或复用 Namespace 名称前需清理原租户的 Task/Workflow。网络隔离、配额和 Pod 安全策略仍由集群管理员按租户配置。
 
@@ -681,9 +687,9 @@ Accept: text/event-stream
 | `follow` | bool | `false` | 仅传字符串 `true` 时持续跟踪 |
 | `sinceSeconds` | int64 | 空 | 仅返回最近指定秒数内的日志 |
 
-服务端按照 `kubetask.io/task=<task name>` 标签查找 Job，再查找该 Job 的
-Pod，并读取名为 `task` 的容器日志。当前实现使用 Job 列表返回结果中的最后
-一个 Job；接口没有显式指定按时间排序。
+服务端在 Task 标签指定的执行 Namespace（无标签时为 `default`）按
+`kubetask.io/task=<task name>` 查找 Job，再查找该 Job 的 Pod 并读取名为 `task` 的容器日志。
+对于有租户标签的 Task，还会核对 Job→Task、Pod→Job 的控制者 UID。接口从各自列表结果中取最后一项，未显式按时间排序。
 
 响应头：
 
@@ -705,6 +711,7 @@ data: task completed
 
 `follow=true` 跟踪当前 Pod 的日志；上游日志流正常结束（EOF）时，SSE 响应也结束。
 客户端保留已收到的日志；此连接不等待或自动切换到该 Task 的后续执行。
+合并后的本地验证与远端真实 Pod 验收范围分别见 [项目状态](PROJECT_STATUS.md)。
 
 使用 `curl` 查看：
 

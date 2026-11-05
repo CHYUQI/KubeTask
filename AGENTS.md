@@ -241,12 +241,14 @@ API 修改 spec/metadata 用 `Update()`；Trigger 还会单独调用 `Status().U
 - 配置通常为环境变量 > YAML > 默认值；仅显式认证 Flag 优先于环境变量。三个既有 Metrics/Leader/Probe Flag 仅注册，未绑定加载器。
 - `auth-enabled=false` 默认匿名；开启必须设置非空 `auth-audience`，且必须能加载 Kubernetes 配置。
 - `auth-enabled` 同时控制身份认证、SubjectAccessReview 授权和已认证写操作的 Events 审计。
+- 启用时中间件顺序为认证 → 可选租户范围 → 审计 → 授权；审计包在授权外层，才能记录 403。
 - `tenant-isolation-enabled` 默认关闭，开启时依赖认证。使用可信 ServiceAccount Namespace 进行 RoleBinding 审查，Task/Workflow 按服务端 `kubetask.io/tenant` 标签限制访问，子 Task 继承标签。CRD 仍为集群级、名字全局唯一；旧资源不自动迁移。
 - CI API Key 使用 `ktk_` Bearer，按请求读取 `auth-api-keys-file` 的摘要绑定并校验 ServiceAccount UID；删除绑定后随文件更新撤销。审计记录账号、目标、动作和状态，保留期由集群 Events TTL 决定。
 - 认证及每个授权阶段使用最多 3 秒的子 context；业务及 SSE 保留原请求 context，不得把审查超时施加到长连接。
 - 401 返回通用 Unauthorized，资源权限不足返回通用 Forbidden / 403，审查失败返回通用 Service Unavailable / 503；不透传凭据或审查错误。
 - UI Token 只保留页面内存；全部业务请求用 Authorization 头，日志用 fetch SSE。更换/清除时取消旧请求，不自动重试写操作。
 - 业务路由的权限在 `routePermissions` 显式登记，未登记时拒绝执行。Trigger 在修改前检查 tasks get/update 和 tasks/status update；统计/趋势要求 tasks list。日志先检查 tasks get，定位 Pod 后、打开流前检查实际 Namespace/Pod 名的 pods/log get。
+- 日志只跟踪选中的 Pod，follow 模式在上游正常 EOF 时结束 SSE。修改日志路径时验证服务端自然结束、长连接跨过审查超时和客户端取消；前端保留已收到的日志，不自动跟踪后续 Job。
 - Helm 使用 `auth.enabled` / `auth.audience` / `auth.tenantIsolation` 配置；通过 `auth.apiKeys.existingSecret` 挂载已有 Key 文件。Chart 管理的后端账号具备两项审查和审计写入权限，启用 Key 时增授 ServiceAccount get；外部账号自行补权限，详见 API 文档。
 - 无 Kubernetes 配置且未开启认证时进入 Standalone：仅 `/healthz` 为 200，其余请求为 503，不挂载 SPA 或 Manager 探针。
 

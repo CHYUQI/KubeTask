@@ -1,5 +1,32 @@
 # KubeTask 项目状态
 
+## 2026-11-05 当前快照
+
+本地 `main` 已在 `f00429f` 合入 SSE EOF 修复，保留 P2.2 的租户定位和实际 Pod 授权。复跑更新后的本地日志连接测试，跨认证超时、客户端取消和最后事件后自然 EOF 均通过。11-02 的真实 Pod 回归是修复分支的历史证据，未在合并快照上重跑。P2.2 与 P2.3 的完整部署验收仍待完成。
+
+## 2026-11-05 合并前工作区复核
+
+范围：Windows amd64。复核开始时本地 `main` 位于 `87446ff`，P2.2 实现尚未提交；收尾以本地 `f59d585` 及本次文档改动为准。后续各日期的记录保留当时的实现与验证范围。
+
+| 范围 | 当前结论 |
+| --- | --- |
+| Task 与 P2.0/P2.1 | Task 调度、同端口 Web UI/API 与 Workflow DAG 已实现；界面支持 Workflow 创建，删除仍通过 API 或 kubectl。 |
+| P2.2 | 当前工作区已接入 TokenReview、SubjectAccessReview、可选 Namespace 租户隔离、CI API Key 和 Events 审计；认证和隔离默认关闭。CRD 仍为集群级、名称全局唯一；旧资源不自动迁移。完整部署待验收。 |
+| P2.3 | 全局失败/超时 Webhook MVP 已实现，默认关闭、尽力投递；真实集群验收及内置机器人、模板等后续功能仍待完成。 |
+| 后续 | P2.4 的资源感知调度与 P3 的多集群、错峰等仍在规划；Job deadline 和 Cron 并发控制已有。 |
+
+| 本次检查 | 结果 |
+| --- | --- |
+| Go 1.27.3 / controller-gen v0.21.0 / Kubernetes 1.35.0 envtest | 编译、vet、生成、再次编译、默认全量 `go test ./... -count=1` 全部通过；含真实本地 TokenReview/SAR、租户访问和 Job 落位、API Key 与 Events 测试。 |
+| CRD 与生成物 | CRD、DeepCopy 和 RBAC 重新生成后与本地 HEAD 无内容差异；两个 Helm CRD 副本的 SHA-256 与生成清单一致。 |
+| 前端（Node 24.17.0 / npm 11.13.0） | `npm test` 39/39；Vite 8.1.4 生产构建通过，Dashboard 8.77 kB、最大 renderer 分块 268.72 kB，未出现 500 kB 提示。 |
+| Helm | lint 通过；默认和全功能模板渲染通过，核对认证/租户开关、ConfigMap 校验和、API Key 文件挂载、Webhook URL Secret 引用与相关 RBAC。 |
+| 文档 | 全部 11 份受版本管理的 Markdown 已更新；本地链接/锚点、15 条业务路由和 `git diff --check` 通过。 |
+
+**合并前的分支差异**：当时本地相对 `KubeTask/main` 领先 6 笔、落后 1 笔，缺少 `58fb3ed`（#3）。本地 `internal/api/handler/log_handler.go` 在 `follow=true` 且上游正常 EOF 时返回 `scanner.Err() == nil`，Gin 会继续调用扫描回调；远端改为返回 `false` 并记录了真实 Pod 回归。上表保留当时的文档复核结果，不把远端真实集群结果计入本地验证；后续合并与本地复验见 [SSE 修复记录](#2026-11-02-修复-pod-日志-sse-eof-空转)。
+
+本次未重新运行浏览器、真实集群部署、镜像构建、Kind e2e 或 Token 自然过期慢测。完整 P2.2 部署检查见 [项目计划](../PROJECT_PLAN.md#p22-多租户与认证1-周)；P2.3 检查见 [Webhook 方案](../PROJECT_PLAN.md#全局通用-webhook-mvp2026-10-26-定案)。
+
 ## 2026-11-05 Helm 认证、租户隔离、API Key 与操作审计
 
 - 基于本地 `main`、HEAD `87446ff` 与工作区已有的 RBAC 接入修改，按顺序完成 P2.2 的四项后续工作。Helm 增加 `auth.enabled`、`auth.audience`，开启时校验 audience；ConfigMap 变更触发 Pod 滚动更新，保留后端审查权限。
@@ -123,13 +150,15 @@
 - 当前工作区的完整 Windows Go 流水线也通过：Go 1.27.3 编译、vet、controller-gen、生成后编译，以及设置绝对 envtest 路径的默认全部测试；生成物无内容差异。该结果包含工作区既有后端修改，未由本次前端整理改动这些实现。
 - 维护说明已同步至 [前端 README](../web/README.md#源码组织) 与 [集成记录](../web/LIQUID_GLASS.md#source-cleanup-2026-10-22)。
 
-核对日期：2026-10-20（Asia/Shanghai）。基于本地 `main`、HEAD `468da87` 和当前未提交的工作区；不代表远端发布状态。
+## 2026-10-20 项目核对（历史快照）
+
+核对日期：2026-10-20（Asia/Shanghai）。基于当时的本地 `main`、HEAD `468da87` 和未提交工作区；不代表当前状态。此处保留原核对结果及后续追加的注记。
 
 最新前端收尾记录见 [2026-10-21 全站玻璃容器与交付收尾](#2026-10-21-全站玻璃容器与交付收尾)。以下各日期记录对应当时快照，保留原验证边界。
 
 当前 Go 基线为 **1.27.3**；升级与验证见 [2026-10-22 Go 版本升级](#2026-10-22-go-版本升级)。
 
-## 实现进度
+### 当时的实现进度
 
 | 范围 | 当前状态 | 代码依据 |
 | --- | --- | --- |
@@ -144,7 +173,7 @@
 | P2.4 | 资源感知调度待实现；Job deadline 与 Cron 并发策略已有 | Controller 与计划书对照 |
 | P3 | 多集群、错峰预测、业务指标/Grafana、Serverless 为规划 | 当前无对应执行模块；clusterName / database 配置仅预留 |
 
-## 本次检查结果
+### 当时的检查结果
 
 环境：Windows amd64，Go 1.25.7、controller-gen v0.21.0、Node 24.17.0、npm 11.13.0；envtest Kubernetes 1.35.0。前端依赖以 `web/package-lock.json` 为准，本次 Vite 构建输出版本为 8.1.4。
 
@@ -165,7 +194,7 @@
 
 默认 Go 测试不包含 `//go:build e2e` 的 Kind 套件；未开启 `KUBETASK_TEST_TOKEN_EXPIRY=true` 的自然过期慢测。本次没有运行真实集群、浏览器、Docker 镜像构建或 Helm 安装验收。已有真实 Pod / 日志证据见 [2026-10-13 minikube 验收](P2.1_VERIFICATION.md)，前端认证的历史浏览器验收见 [P2.2 记录](P2.2_FRONTEND_AUTH_VERIFICATION.md)。
 
-## 已确认的配置与运行边界
+### 当时的配置与运行边界
 
 - `router.go` 注册 15 个 `/api/v1` 业务路由和公开 `/healthz`。Manager 探针默认 `:8081`，Metrics 默认 TLS `:8443`，不在业务 `/api/v1` 下。
 - Task / Workflow 是 Cluster-scoped，Job 固定在 `default`；ServiceAccount namespace 不提供租户隔离。
@@ -176,7 +205,7 @@
 - Job Controller 负责 Pod 重试；KubeTask 根据 Job 终态记执行结果，不实现独立指数退避。历史最多 10 条，TTL 清理 Job/Pod 后日志接口不能恢复其内容。
 - Workflow 子 Task 进入 Task 列表/统计/趋势是预期行为；spec、suspend/resume、trigger 的既有取舍按 [AGENTS.md](../AGENTS.md) 保留。
 
-## 文档同步
+### 当时的文档同步
 
 已核对并更新全部 8 份既有 Markdown 文档：中英文 README、PROJECT_PLAN、AGENTS、web/README、API、P2.1 与 P2.2 验收记录，并新增本文。
 

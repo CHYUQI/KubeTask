@@ -81,7 +81,7 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 #### P1.4 Web 管理界面
 - [x] Vue 3 + Vite + 原生 SVG 图表，仪表盘、Task 列表/创建/详情、日志面板
 - [x] 任务 YAML 预览、执行历史、触发/暂停/恢复/删除
-- [x] Workflow 列表/详情与 Dagre 自动布局、状态着色和节点跳转
+- [x] Workflow 列表/创建/详情与 Dagre 自动布局、状态着色和节点跳转；删除仍使用 API / kubectl
 - [ ] Task 编辑表单（当前更新 spec 使用 PUT API）
 
 #### P1.5 日志系统
@@ -93,7 +93,8 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 - [x] Helm Chart：CRD 位于 `charts/kubetask/crds/`，Service / Ingress 指向 8080
 - [x] k3s 安装脚本 `deploy/k3s/install.sh`
 - [x] Makefile（Unix）；Windows 直接调用工具链，命令见 AGENTS.md
-- [ ] 当前认证功能的容器/Helm 部署验收及配套权限配置
+- [x] Helm 认证、租户隔离、API Key 配置与后端审查/审计权限
+- [ ] 使用新镜像完成 P2.2/P2.3 的真实集群部署验收
 
 #### P1.7 测试
 - [x] Controller / Handler 的 Ginkgo + envtest，认证、配置与 DAG 单元测试
@@ -233,6 +234,8 @@ spec:
 > 2026-11-01：RBAC 资源授权接入启动链与业务路由，随 auth-enabled 同时启停；使用现有 viewer/editor 角色，补齐任务编辑及管理员模板的 trigger 状态写权限、Helm 后端的审查权限。Namespace 隔离、API Key 与审计仍待后续推进，部署和验证边界见 [API 文档](docs/API.md#12-资源权限要求) 与项目状态。
 
 > 2026-11-05：按顺序完成 Helm 认证、Namespace 隔离、API Key 和 Events 审计，未修改 CRD。配置、角色绑定与边界见 [API 文档](docs/API.md#11-认证配置与路由接入)。
+
+**真实部署待验收**：在隔离集群安装新镜像并开启认证和租户隔离。分别验证无凭据 401、只读账号写操作 403、两个租户的按名访问与统计隔离、Workflow 子 Task 和实际 Job/Pod 落位、实际 Pod 的日志权限、Secret 投影后 Key 撤销，以及成功和拒绝写操作在调用者 Namespace 的 Events。当前结果为本地 envtest、单测和 Helm 渲染，见 [项目状态](docs/PROJECT_STATUS.md)；完整验收不能沿用旧版 minikube 或远端单项 SSE 结果。
 
 #### P2.3 告警通知（1 周）
 - [x] **全局 Webhook MVP**：任务执行失败/超时 → 固定 JSON Payload，异步尽力投递（真实集群验收待完成）
@@ -515,7 +518,7 @@ Manager 在默认 `:8081` 提供 `/healthz`、`/readyz`；业务端口 `:8080` �
 
 ### 已有交付物
 - [x] Task / Workflow Go 类型、生成 CRD / RBAC / DeepCopy、两个 Reconciler
-- [x] Gin API、可选 TokenReview 身份认证、SSE 与静态托管
+- [x] Gin API、可选 Bearer 认证与 RBAC、租户范围、Events 审计、SSE 与静态托管
 - [x] 全局通用 Webhook MVP、配置与 Helm Secret 接入（尽力投递，真实集群待验收）
 - [x] Vue 3 源码、内存 Token 接入、DAG 与认证测试
 - [x] Dockerfile、Helm Chart、k3s 脚本（源码交付与部署验收分别记录）

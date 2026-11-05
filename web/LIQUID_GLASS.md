@@ -1,5 +1,10 @@
 # Liquid glass integration
 
+Review on 2026-11-05: the Vue adapters and the pinned renderer subset remain in use.
+The current Node suite passed 39 tests and the Vite production build succeeded.
+The measurements and validation scope are in the [project status](../docs/PROJECT_STATUS.md).
+The dated browser observations below are historical; this review did not repeat them.
+
 Current container/navigation correction: [Original container optics and navigation text, 2026-10-22](#original-container-optics-and-navigation-text-2026-10-22).
 
 Latest changes: [Bundle reduction and clipped button shadows, 2026-10-22](#bundle-reduction-and-clipped-button-shadows-2026-10-22).

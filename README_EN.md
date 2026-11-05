@@ -8,7 +8,7 @@ KubeTask describes tasks and workflows with custom resources (CRDs): a `Task` is
 
 > Positioning: lightweight, extensible, and easy to deploy — suitable for small/medium teams, edge computing (k3s), and cloud-native learning.
 
-Status (2026-11-05): Workflow orchestration/UI, Helm auth configuration, RBAC, optional namespace tenant isolation, CI/CD API keys, Events auditing, and the global webhook MVP are implemented. P2.2/P2.3 real deployment validation remains pending. See [project status](docs/PROJECT_STATUS.md) for validation scope.
+Working-tree status (2026-11-05): Workflow orchestration/UI, Helm auth configuration, RBAC, optional namespace tenant isolation, CI/CD API keys, Events auditing, and the global webhook MVP are implemented. Full P2.2/P2.3 deployment acceptance is pending. See [project status](docs/PROJECT_STATUS.md) for local checks and differences from the remote-tracking branch.
 
 ## Features
 
@@ -189,7 +189,7 @@ Full request parameters, response shapes, error codes, and SSE log details live 
 
 > The Workflow HTTP API is available (create / list / get / delete). The detail endpoint returns the nodes, edges, topological order, and parallel levels the frontend DAG view needs.
 
-Open the workflow list in the sidebar, filter by phase, and select a name to view its DAG. The graph supports zoom, fit-to-window, and node inspection; dashed edges indicate failure branches. Child Task and log links are available for scheduled nodes. Active workflow details refresh every five seconds by default and stop polling at a terminal phase; automatic refresh can be disabled and manual refresh remains available. Create and delete workflows through the API or `kubectl`.
+Open Workflows in the top navigation, filter by phase, and select a name to view its DAG. The graph supports zoom, fit-to-window, and node inspection; dashed edges indicate failure branches. Child Task and log links are available for scheduled nodes. Active workflow details refresh every five seconds by default and stop polling at a terminal phase; automatic refresh can be disabled and manual refresh remains available. The UI can create workflows; use the API or `kubectl` to delete them.
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -374,8 +374,10 @@ webhook-max-retries: 3  # Retries after the first attempt
 | `api-host` | `KUBETASK_API_HOST` | `0.0.0.0` | HTTP listen address |
 | `api-port` | `KUBETASK_API_PORT` | `8080` | HTTP port |
 | `web-dir` | `KUBETASK_WEB_DIR` | `/web/dist` | Web UI static directory; when missing, only the UI is disabled and the API keeps running |
-| `auth-enabled` | `KUBETASK_AUTH_ENABLED` | `false` | Enable ServiceAccount authentication for the HTTP API; also supports `--auth-enabled` |
+| `auth-enabled` | `KUBETASK_AUTH_ENABLED` | `false` | Enable Bearer authentication, RBAC, and authenticated write auditing; also supports `--auth-enabled` |
 | `auth-audience` | `KUBETASK_AUTH_AUDIENCE` | Empty string | Expected token audience, required when enabled; also supports `--auth-audience` |
+| `tenant-isolation-enabled` | `KUBETASK_TENANT_ISOLATION_ENABLED` | `false` | Scope API resources and Jobs to the authenticated identity's namespace; requires auth |
+| `auth-api-keys-file` | `KUBETASK_AUTH_API_KEYS_FILE` | Empty string | JSON file of CI key digests and account bindings; requires auth |
 | `webhook-enabled` | `KUBETASK_WEBHOOK_ENABLED` | `false` | Enable global Task failure/timeout notifications |
 | `webhook-url` | `KUBETASK_WEBHOOK_URL` | Empty string | HTTP(S) receiver URL without userinfo or fragment |
 | `webhook-timeout` | `KUBETASK_WEBHOOK_TIMEOUT` | `5s` | Total timeout per request, from 1 to 30 seconds |
@@ -392,11 +394,13 @@ webhook-max-retries: 3  # Retries after the first attempt
 
 Authentication applies to all `/api/v1` endpoints; health checks and static assets stay public.
 With authentication enabled, both identity and RBAC checks are required. Failure to load Kubernetes configuration stops startup. Review permissions are not probed at startup; review failures return 503 at request time. A valid Token without the required resource permissions receives 403.
-Use **设置 Token** at the top of the Web UI to enter a ServiceAccount token. API requests and SSE logs
+Use **API 认证** in the top navigation to enter a ServiceAccount token. API requests and SSE logs
 send it in the Authorization header. Tokens stay in page memory and must be entered again after a reload.
 Replacing or clearing a token cancels old requests and reloads the current view. A 401 prompts for a new token;
 403/503 responses keep the credential. See the
 [API documentation](docs/API.md#11-认证配置与路由接入) for configuration, responses, and authorization boundaries.
+
+Helm uses `auth.enabled` and `auth.audience` to enable access control; `auth.tenantIsolation` enables tenant scoping separately. CI uses a `ktk_` Bearer key; the server mounts digest bindings through `auth.apiKeys.existingSecret`. Task and Workflow names stay globally unique, and existing objects are not migrated automatically.
 
 The global webhook emits `task.failed` for a terminal Job failure and `task.timeout` for `DeadlineExceeded`. Pod retries, success, deletion, and validation failures without a Job produce no notification. Initial synchronization skips historical failures; restarting does not backfill them. Queue overflow, shutdown, or exhausted retries may lose events; receivers should deduplicate by `eventId`. Workflow summaries, robot-specific formats, signatures and custom authentication headers are outside this MVP. See the [P2.3 design](PROJECT_PLAN.md#全局通用-webhook-mvp2026-10-26-定案) for the protocol and delivery limits.
 
@@ -425,7 +429,8 @@ kubetask/
 ├── internal/
 │   ├── config/                     # Viper: env > YAML > defaults; explicit auth flags override env
 │   ├── logger/                     # Zap structured logging
-│   ├── auth/                       # ServiceAccount TokenReview authentication
+│   ├── auth/                       # TokenReview, API keys, and SubjectAccessReview
+│   ├── tenant/                     # Tenant labels, request scope, and Job lookup
 │   ├── notification/               # Job failure observation and global webhook delivery
 │   ├── naming/                     # Shared Task name length limit
 │   ├── controller/                 # Task / Workflow Reconciler + envtest suites

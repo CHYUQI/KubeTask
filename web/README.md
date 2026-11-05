@@ -1,6 +1,6 @@
 # KubeTask Web UI
 
-最后核对：2026-10-22。Vue 3 + Vite + Vue Router + 原生 SVG 图表 + Dagre；生产静态资源由 Gin 与 REST API 在 8080 同端口提供。当前检查结果见 [项目状态](../docs/PROJECT_STATUS.md)。
+最后核对：2026-11-05。Vue 3 + Vite + Vue Router + 原生 SVG 图表 + Dagre；生产静态资源由 Gin 与 REST API 在 8080 同端口提供。当前检查结果见 [项目状态](../docs/PROJECT_STATUS.md)。
 
 ## 开发与构建
 
@@ -42,13 +42,15 @@ Workflow 子 Task 出现在任务列表和统计中是预期行为。API 与领�
 
 `src/api/index.js` 为普通业务请求入口，`auth.js` 管理页面内存中的 Token 与请求取消，`http.js` 处理通用错误，`logs.js` 使用 fetch 流式读取 SSE，以支持 Authorization 请求头。
 
-页面上方可设置、更换或清除原始 ServiceAccount Token。Token 不写入 URL、localStorage 或 sessionStorage，刷新后需重新输入；未设置时匿名访问，兼容后端默认关闭认证的状态。更换/清除会取消旧请求并重新加载当前视图，不自动重试写操作。
+通过顶部「API 认证」设置、更换或清除原始 ServiceAccount Token。Token 不写入 URL、localStorage 或 sessionStorage，刷新后需重新输入；未设置时匿名访问，兼容后端默认关闭认证的状态。更换/清除会取消旧请求并重新加载当前视图，不自动重试写操作。
 
-401 展开 Token 输入提示；403 提示权限不足，503 提示服务不可用，保留凭据。前端支持 403 不代表后端已实现 RBAC 资源授权。普通请求超时 10 秒，SSE 只限制建立连接的时间，正常 EOF 保留日志，离开页面/停止会取消流。
+401 展开 Token 输入提示；403 提示权限不足，503 提示服务不可用，保留凭据。后端开启认证时同时执行 RBAC，租户隔离由后端按可信身份确定；浏览器不传租户参数。CI 的 API Key 配置见 [API 文档](../docs/API.md#14-cicd-api-key)。
+
+普通请求超时 10 秒；SSE 只限制建立连接的时间。服务端在所选 Pod 的日志流正常 EOF 时结束响应，页面保留收到的日志，不自动跟踪后续 Job；离开页面或点击停止会取消流。客户端与服务端的验证边界见 [项目状态](../docs/PROJECT_STATUS.md)。
 
 ## 验证
 
-`npm test` 使用 Node 原生测试，覆盖认证与请求取消、SSE 解码、DAG 布局、Workflow 创建请求、玻璃材质及表面缓存、图表 SVG 和日志格式化；本次 **37/37** 通过。生产构建通过，Dashboard 约 8.6kB，已无大于 500kB 的分块提示。构建与后端回归的最终结果统一记录在 [项目状态](../docs/PROJECT_STATUS.md)。
+`npm test` 使用 Node 原生测试，覆盖认证与请求取消、SSE 解码、DAG 布局、Workflow 创建请求、玻璃材质及表面缓存、图表 SVG 和日志格式化；本次 **39/39** 通过。生产构建通过，Dashboard 8.77 kB，最大 renderer 分块 268.72 kB，未出现大于 500 kB 的分块提示。构建与后端回归见 [项目状态](../docs/PROJECT_STATUS.md)。
 
 历史浏览器与集群验收见 [P2.1](../docs/P2.1_VERIFICATION.md) 和 [P2.2 前端认证](../docs/P2.2_FRONTEND_AUTH_VERIFICATION.md)。Node 单测与静态构建不代替浏览器或真实集群验收。
 
