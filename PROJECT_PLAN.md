@@ -2,7 +2,7 @@
 
 ## 项目计划书与实现进度
 
-最后核对：2026-10-26。MVP 与 P2.0/P2.1 已实现，P2.2 认证部分完成；P2.3 全局通用 Webhook MVP 已实现，真实集群验收待完成。版本号为规划标签，不表示已发布；当前 Chart/image 默认标签仍为 v0.1.0。当前验证结果见 [项目状态](docs/PROJECT_STATUS.md)，历史节点保留其当时的测试数量与验收范围。
+最后核对：2026-11-05。MVP 与 P2.0/P2.1 已实现；P2.2 已实现认证、授权、Namespace 租户隔离、CI/CD API Key 和 Events 审计；P2.3 全局通用 Webhook MVP 已实现。P2.2/P2.3 真实部署仍待验收。当前 Chart/image 默认标签仍为 v0.1.0；历史节点保留当时的验收范围，最新结果见 [项目状态](docs/PROJECT_STATUS.md)。
 
 ---
 
@@ -219,14 +219,20 @@ spec:
 
 
 #### P2.2 多租户与认证（1 周）
-- [ ] **基于 K8s ServiceAccount + RBAC 的认证**
-  - [x] ServiceAccount TokenReview 身份认证、配置与 HTTP 路由接入（RBAC 资源授权仍待完成）
+- [x] **基于 K8s ServiceAccount + RBAC 的认证**
+  - [x] ServiceAccount TokenReview 身份认证、配置与 HTTP 路由接入
+  - [x] SubjectAccessReview 资源授权接入全部业务接口；Trigger / 统计 / Pod 日志按实际操作检查；只读与拒绝路径通过本地 envtest 验证，尚未完成真实部署验收
   - [x] 前端 Token 设置/清除、普通 API 与 SSE 日志携带 Bearer 请求头、401 提示；凭据仅存页面内存
-- [ ] **Namespace 隔离**：每个租户独立命名空间
-- [ ] **API Key 认证**：用于 CI/CD 系统集成
-- [ ] **操作审计**：关键操作记录到 K8s Events
+- [x] **Helm 认证部署配置**：可配置开关、audience，受管账号具备审查权限
+- [x] **Namespace 隔离**：可信身份 Namespace 限制 API 资源访问和 Job 执行，保留集群级 CRD
+- [x] **API Key 认证**：用于 CI/CD，Secret 文件绑定 ServiceAccount UID，更新文件可撤销
+- [x] **操作审计**：已认证写操作和结果记录到 Kubernetes Events
 
 > 2026-10-20：前端接入已有 ServiceAccount 认证，支持页面内存中的 Token 设置/清除、全部业务 API 与 SSE 日志请求头，以及 401/403/503 提示。详见 [前端认证验收记录](docs/P2.2_FRONTEND_AUTH_VERIFICATION.md)。RBAC 授权、租户隔离、API Key 和审计仍待完成。
+
+> 2026-11-01：RBAC 资源授权接入启动链与业务路由，随 auth-enabled 同时启停；使用现有 viewer/editor 角色，补齐任务编辑及管理员模板的 trigger 状态写权限、Helm 后端的审查权限。Namespace 隔离、API Key 与审计仍待后续推进，部署和验证边界见 [API 文档](docs/API.md#12-资源权限要求) 与项目状态。
+
+> 2026-11-05：按顺序完成 Helm 认证、Namespace 隔离、API Key 和 Events 审计，未修改 CRD。配置、角色绑定与边界见 [API 文档](docs/API.md#11-认证配置与路由接入)。
 
 #### P2.3 告警通知（1 周）
 - [x] **全局 Webhook MVP**：任务执行失败/超时 → 固定 JSON Payload，异步尽力投递（真实集群验收待完成）
@@ -389,7 +395,7 @@ flowchart LR
     STATUS --> HTTP
 ```
 
-数据保存在 Kubernetes CR 的 spec/status 中；当前没有数据库依赖、AI 预测器或远程集群执行模块。Gin 使用后端身份访问集群，TokenReview 尚未配套调用者资源授权。
+数据保存在 Kubernetes CR 的 spec/status 中；当前没有数据库依赖、AI 预测器或远程集群执行模块。Gin 在业务操作前通过 TokenReview / SubjectAccessReview 校验调用者，实际集群请求仍由后端身份执行。
 
 ### 关键技术选型
 
@@ -518,7 +524,6 @@ Manager 在默认 `:8081` 提供 `/healthz`、`/readyz`；业务端口 `:8080` �
 - [x] docs/API.md、docs/PROJECT_STATUS.md 与阶段验收记录
 
 ### 后续交付物
-- [ ] RBAC 资源授权、租户隔离、API Key 与审计
 - [ ] 内置机器人通知渠道、业务指标、Grafana Dashboard 与告警规则
 - [ ] 多集群、资源感知、错峰调度
 - [ ] PostgreSQL / GORM 与迁移（规划项，当前无数据库运行要求）
@@ -530,8 +535,8 @@ Manager 在默认 `:8081` 提供 `/healthz`、`/readyz`；业务端口 `:8080` �
 
 | 项目 | 当前事实与后续措施 |
 | --- | --- |
-| 认证与授权 | 目前仅确认身份；后续接资源授权，不能把 ServiceAccount namespace 当租户隔离 |
-| 部署配置 | 开启认证需 TokenReview create 权限；Chart 尚未接入认证 values；在隔离环境验证后发布 |
+| 认证与授权 | 已接入身份、资源授权及可选 Namespace 隔离；集群级 CRD 保留全局名称，真实部署需独立验收 |
+| 部署配置 | Chart 提供认证 values 和审查、审计权限；启用 API Key 时挂载已有 Secret 并读取绑定账号 |
 | Watch 与执行状态 | 依赖 controller-runtime 与 Job 条件同步；envtest 不运行真实 Job/Pod 控制器，需真实集群补充 |
 | 任务耗时 | activeDeadlineSeconds 已传给 Job；DeadlineExceeded 可通过全局 Webhook 尽力通知，真实集群待验收 |
 | 历史与日志保留 | Task 仅留最近 10 条摘要；TTL 清理 Job/Pod 后无法继续读取其日志，尚无外部归档 |
@@ -565,9 +570,9 @@ kubectl port-forward svc/kubetask 8080:8080
 kubectl apply -f config/samples/kubetask_v1_task.yaml
 ```
 
-公开入口为 Web UI/API `:8080`，Manager 探针 `:8081`，TLS Metrics `:8443`。Chart 的 `metrics.port` 目前用于 8081 探针端口声明，不代表 Metrics 默认监听 8081；认证 values 和 TokenReview 权限尚未接入 Chart，开启步骤见 [API 文档](docs/API.md#11-认证配置与路由接入)。Helm 升级时需单独核对 CRD 更新，`crds/` 与 `config/crd/bases/` 应保持同步。
+公开入口为 Web UI/API `:8080`，Manager 探针 `:8081`，TLS Metrics `:8443`。Chart 的 `metrics.port` 目前用于 8081 探针端口声明，不代表 Metrics 默认监听 8081；Chart 已包含认证 values，开启步骤见 [API 文档](docs/API.md#11-认证配置与路由接入)。Helm 升级时需单独核对 CRD 更新，`crds/` 与 `config/crd/bases/` 应保持同步。
 
-当前已有全局 Webhook 尽力投递，尚无调用者资源授权、租户隔离、审计与内置机器人通知；Webhook 真实集群及生产可用性需独立验收，本计划不声明已经达到生产指标。
+当前已有调用者资源授权、可选租户隔离、Events 审计与全局 Webhook 尽力投递；真实集群及生产可用性需独立验收，本计划不声明已经达到生产指标。
 
 ---
 
@@ -618,4 +623,4 @@ kubectl apply -f config/samples/kubetask_v1_task.yaml
 
 ---
 
-> **进度**：v0.2.0 规划进行中，P2.2 部分完成、P2.3 Webhook MVP 已实现 | **最后核对**：2026-10-26
+> **进度**：v0.2.0 规划进行中，P2.2 与 P2.3 Webhook MVP 已实现，真实部署待验收 | **最后核对**：2026-11-05

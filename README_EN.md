@@ -8,7 +8,7 @@ KubeTask describes tasks and workflows with custom resources (CRDs): a `Task` is
 
 > Positioning: lightweight, extensible, and easy to deploy — suitable for small/medium teams, edge computing (k3s), and cloud-native learning.
 
-Status (2026-10-26): P2.0 same-port packaging and P2.1 Workflow orchestration/UI are implemented. P2.2 includes ServiceAccount authentication and frontend Token support; resource authorization, tenant isolation, API keys, and auditing remain pending. P2.3 now includes the global webhook MVP; real-cluster validation remains pending. See [project status](docs/PROJECT_STATUS.md) for current checks and validation limits.
+Status (2026-11-05): Workflow orchestration/UI, Helm auth configuration, RBAC, optional namespace tenant isolation, CI/CD API keys, Events auditing, and the global webhook MVP are implemented. P2.2/P2.3 real deployment validation remains pending. See [project status](docs/PROJECT_STATUS.md) for validation scope.
 
 ## Features
 
@@ -39,7 +39,7 @@ Status (2026-10-26): P2.0 same-port packaging and P2.1 Workflow orchestration/UI
 - **SSE streaming logs**: reads Job Pod logs in real time through the Kubernetes API with `tail`, `sinceSeconds`, and `follow` support
 - **Configuration**: environment variables > YAML > defaults (Viper, `KUBETASK_` prefix); explicit authentication flags override environment variables
 - **Global webhook**: optional JSON notifications for Task execution failures/timeouts, with Workflow child context, an asynchronous queue, deduplication and bounded retries; best-effort delivery
-- **Optional authentication**: ServiceAccount TokenReview and Bearer headers; in-memory UI Token settings support HTTP and fetch SSE; resource authorization remains pending
+- **Optional authentication and authorization**: ServiceAccount TokenReview and SubjectAccessReview RBAC; in-memory UI Token settings support HTTP and fetch SSE, with caller permissions checked before business operations
 - **Structured logging**: Zap with console / JSON formats
 - **Observability**: controller-runtime metrics, `/healthz` health check, `/readyz` readiness check
 - **Standalone mode**: when Kubernetes configuration cannot be loaded and authentication is disabled, `/healthz` returns 200 and other requests return a 503 hint
@@ -359,8 +359,10 @@ health-probe-bind-address: ":8081"
 leader-elect: true
 enable-http2: false
 web-dir: /web/dist      # Web UI static directory (default inside the image)
-auth-enabled: false    # Require ServiceAccount Bearer tokens for the API when enabled
+auth-enabled: false    # Enable Bearer authentication, RBAC, and write auditing
 auth-audience: ""      # Required when authentication is enabled, e.g. kubetask
+tenant-isolation-enabled: false # Scope API access and Jobs by caller namespace
+auth-api-keys-file: ""          # Optional JSON file of API key digest bindings
 webhook-enabled: false
 webhook-url: ""        # Required when enabled; can be injected from a Secret through the environment
 webhook-timeout: 5s
@@ -389,7 +391,7 @@ webhook-max-retries: 3  # Retries after the first attempt
 > The `database-*` keys are reserved (planned PostgreSQL persistence) and are not used by the current version.
 
 Authentication applies to all `/api/v1` endpoints; health checks and static assets stay public.
-With authentication enabled, failure to load Kubernetes configuration stops startup. TokenReview permissions are not probed at startup; review failures return 503 at request time.
+With authentication enabled, both identity and RBAC checks are required. Failure to load Kubernetes configuration stops startup. Review permissions are not probed at startup; review failures return 503 at request time. A valid Token without the required resource permissions receives 403.
 Use **设置 Token** at the top of the Web UI to enter a ServiceAccount token. API requests and SSE logs
 send it in the Authorization header. Tokens stay in page memory and must be entered again after a reload.
 Replacing or clearing a token cancels old requests and reloads the current view. A 401 prompts for a new token;
@@ -496,7 +498,8 @@ go test ./... -count=1
 | ↳ | Workflow Reconciler: child Task orchestration, status write-back, failure propagation, `maxParallel` throttling, deletion cleanup | ✅ Done |
 | ↳ | Workflow HTTP API and frontend DAG view (list/detail, Dagre layout, state refresh, child Task/log links) | ✅ Done |
 | ↳ | ServiceAccount authentication and Web UI Token / SSE support | ✅ Implemented; disabled by default |
-| ↳ | RBAC resource authorization, namespace isolation, API keys, auditing | 🚧 Pending |
+| ↳ | RBAC resource authorization | ✅ Integrated with business APIs; local envtest verified |
+| ↳ | Helm auth, namespace isolation, API keys, Events auditing | ✅ Implemented; see [configuration](docs/API.md#11-认证配置与路由接入) |
 | ↳ | Webhook/DingTalk/WeCom alerts and resource-aware scheduling | 📋 Planned |
 | **v0.3.0** | Multi-cluster management (k3s + ACK cloud-edge), smart off-peak scheduling, Prometheus + Grafana observability | 📋 Planned |
 

@@ -1,5 +1,23 @@
 # KubeTask 项目状态
 
+## 2026-11-05 Helm 认证、租户隔离、API Key 与操作审计
+
+- 基于本地 `main`、HEAD `87446ff` 与工作区已有的 RBAC 接入修改，按顺序完成 P2.2 的四项后续工作。Helm 增加 `auth.enabled`、`auth.audience`，开启时校验 audience；ConfigMap 变更触发 Pod 滚动更新，保留后端审查权限。
+- 可选 `tenant-isolation-enabled` 从可信 ServiceAccount 身份取得 Namespace。API 以租户 RoleBinding 和 `kubetask.io/tenant` 标签限制 Task/Workflow 访问；跨租户返回 404，旧无标签资源不自动迁移。子 Task 继承归属，Job/Pod 使用租户 Namespace，日志检查实际 Pod。CRD 仍为集群级、名称全局唯一；默认关闭隔离。
+- API Key 复用 Bearer、RBAC 与租户链路，通过 Secret 挂载摘要和 ServiceAccount UID 绑定。按请求读取文件，删除条目随文件更新撤销；删除或同名重建账号使旧 Key 失效。Chart 仅在配置 Key Secret 时增加后端 `serviceaccounts get`，无需读取 Kubernetes Secrets API。
+- 开启认证后写操作自动生成 `events.k8s.io/v1` Event，包括 RBAC 拒绝；记录账号、动作、目标和 HTTP 状态，创建使用实际名称/UID，API Key 调用只记录 Key ID。Event 落调用者 Namespace，保留期由集群 TTL 决定；写失败不改变业务结果。生成的 manager-role 和 Chart 仅增加审计所需 `events create` 权限。
+- Windows Go 1.27.3 下编译、vet、controller-gen v0.21.0、生成后编译通过；默认测试中两个包首次链接遇到 C 盘空间不足，改用 D 盘临时目录补跑通过，其余包在首次运行通过。复用本地 Kubernetes 1.35.0 envtest，覆盖租户 RoleBinding / 跨租户拒绝 / Workflow Job 落位、API Key 租户访问，以及成功与拒绝各落一条真实 Event。API Key 撤销及账号 UID 变化由单元测试验证。
+- Helm lint、默认/全功能渲染及 `git diff --check` 通过；CRD、DeepCopy、PROJECT、go.mod/go.sum 无差异。未执行 ECS、真实集群部署或 Helm 安装，不含 Kind e2e 与自然过期慢测。本次启用方法及边界见 [API 文档](API.md#11-认证配置与路由接入)。
+
+## 2026-11-01 业务 API 接入 RBAC
+
+- 基于本地 `main`、HEAD `87446ff`，初始工作区干净。启动链在 `auth-enabled=true` 时顺序挂载身份认证与资源授权，全部 15 个业务接口使用已有 `ResourceAuthorizer` 检查调用者权限；关闭时保留匿名模式。只有有效 Token、没有相应角色的账号现在返回通用 403，审查失败返回通用 503。新增路由未登记权限时拒绝执行。
+- 权限按现有 handler 的实际操作映射：更新/暂停/恢复要求目标 tasks get/update，Trigger 还要求 tasks/status update，统计/趋势要求 tasks list，Workflow 删除要求 get/delete。Task / Workflow 按集群级范围和 URL 名称审查；没有引入 Namespace 隔离或更改 CRD 语义。
+- 日志先检查 Task get，确定 Pod 后、打开上游流前检查实际 Namespace/Pod 名的 pods/log get。认证和每个授权阶段分别使用至多三秒的子 context，不替换业务/SSE context；已建立的流不周期性重新审查。任务编辑及管理员角色模板补齐 status update；Helm controller role 补齐两类审查 create 权限，认证 values 仍未实现，外部 ServiceAccount 仍需管理员授权。
+- 复用已有启动、路由、日志连接与真实 Token envtest 测试：验证全部路由拒绝未授权调用者、Trigger 拒绝时未修改 Task、日志检查实际 Pod 且能超过三秒持续接收事件；本地 Kubernetes 验证无角色为 403，绑定只读 ClusterRole 后读取任务/工作流/统计为 200、创建/删除/触发为 403，审查客户端缺少 SubjectAccessReview 权限为 503。
+- 最终 Windows Go 1.27.3 下按顺序完成编译、vet、controller-gen v0.21.0、生成后编译和绝对 Kubernetes 1.35.0 envtest 路径的默认全量测试，全部通过；生成物和 go.mod/go.sum 无差异。`helm lint ./charts/kubetask` 与 `git diff --check` 通过。未运行 Kind e2e、Token 自然过期慢测、真实集群或 Helm 安装验收；本轮无前端修改，未重复前端验证。
+- API 权限表、角色绑定示例、中英文 README、计划书和 Agent 指南已同步。此前日期的“尚未接入授权”记录保留其历史快照含义，当前状态以上述本轮记录为准。Namespace 隔离、API Key、审计仍待后续推进。
+
 ## 2026-10-28 Webhook MVP 提交前复核
 
 - 复核通知观察、终态分类、队列/去重/重试、取消、配置脱敏与 Helm Secret 接入，未发现阻塞提交的问题；实现范围与 2026-10-26 定案一致。

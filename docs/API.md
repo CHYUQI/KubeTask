@@ -3,16 +3,16 @@
 本文档描述 KubeTask 当前实现的 HTTP API。接口以 `internal/api/router.go` 和
 `internal/api/handler/` 中的代码为准。Workflow（DAG 工作流）接口见第 9 节。
 
-最后核对：2026-10-20。共有 15 个 `/api/v1` 业务路由和公开 `/healthz`；检查结果见 [项目状态](PROJECT_STATUS.md)。
+最后核对：2026-11-05。共有 15 个 `/api/v1` 业务路由和公开 `/healthz`；检查结果见 [项目状态](PROJECT_STATUS.md)。
 
 ## 1. 基本信息
 
 - 默认 API 地址：`http://localhost:8080`
 - API 前缀：`/api/v1`
 - 数据格式：JSON
-- HTTP 认证默认关闭，可通过 `auth-enabled` 开启 ServiceAccount Bearer 认证；资源授权与租户隔离尚未实现。
-- Task 是 Kubernetes Cluster-scoped 资源，不需要在 URL 中携带 namespace。
-- Controller 创建的 Job 当前固定在 `default` namespace 中。
+- HTTP 访问控制默认关闭，可通过 `auth-enabled` 同时开启身份认证与 Kubernetes RBAC 资源授权。
+- Task 和 Workflow 仍是 Kubernetes Cluster-scoped 资源，URL 不带 Namespace；可选的租户隔离根据身份确定租户。
+- 有租户标签的 Task 在对应 Namespace 执行 Job；旧的无标签 Task 继续在 `default` 执行。
 
 除日志流接口外，成功和失败响应均为 JSON。常见错误响应格式如下：
 
@@ -44,15 +44,15 @@ auth-audience: kubetask
 开启时 audience 为空、开关值无法解析、或无法加载 Kubernetes 配置，启动会失败。
 
 启动入口使用已有 Kubernetes 客户端的 `AuthenticationV1().TokenReviews()`
-构造校验器，按开关将认证中间件传入路由。构造时不调用 TokenReview；运行时
-无法完成 TokenReview（包括权限不足）返回下述通用 503，不会转为匿名处理。
+构造身份校验器，并使用 `AuthorizationV1().SubjectAccessReviews()` 构造资源授权校验器。
+开启时按认证、授权顺序挂载中间件；关闭时两者均不挂载。构造时不发送审查请求；
+运行时无法完成任一审查（包括后端缺少审查权限）返回通用 503，不会转为匿名处理。
 
 部署时，**后端进程使用的 Kubernetes 身份**必须有
-`authentication.k8s.io/tokenreviews` 的 `create` 权限；这与调用者是否能读写
-Task 无关。当前 Helm values / ConfigMap 没有认证配置项，Helm controller role
-与 `config/rbac/role.yaml` 也未包含该权限，单设 `--set auth.enabled=true`
-不会开启认证。需要在 Deployment 中显式配置环境变量/启动参数或 YAML，
-并由集群管理员为后端身份单独绑定审查权限，例如：
+`authentication.k8s.io/tokenreviews` 和 `authorization.k8s.io/subjectaccessreviews`
+的 `create` 权限；这与调用者是否能读写 Task 无关。Helm controller role 已包含这两项权限，
+默认 Kustomize 部署通过已有 `metrics-auth-role` 授予；若使用外部 ServiceAccount 或只部署
+生成的 `config/rbac/role.yaml`，需要由管理员补充绑定。以下为独立授权示例：
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -62,6 +62,9 @@ metadata:
 rules:
   - apiGroups: [authentication.k8s.io]
     resources: [tokenreviews]
+    verbs: [create]
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
     verbs: [create]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -80,14 +83,25 @@ subjects:
 
 为客户端 ServiceAccount 申请 Token 时，应使用与 `auth-audience` 相同的 audience
 （例如 `kubectl create token <account> -n <namespace> --audience=kubetask`），
-再通过请求头或 UI 输入。以上部署步骤本轮未在真实集群执行。
+再通过请求头或 UI 输入。Helm 可通过 `auth.enabled` 和 `auth.audience` 开启认证，默认关闭：
+
+```yaml
+auth:
+  enabled: true
+  audience: kubetask
+```
+
+Chart 会把配置写入 ConfigMap，升级时配置变更触发 Pod 滚动更新。由 Chart 管理的
+ServiceAccount 已有两项审查权限；`serviceAccount.create=false` 时由管理员给现有账号授权。
+部署时需使用包含这些功能的新构建镜像；Chart 默认镜像标签仍为 `v0.1.0`。
 
 `NewRouter` 可接收可选的 Gin 中间件，并在注册端点前按传入顺序统一挂到
-`/api/v1` 路由组。调用方可显式传入已有的认证中间件：
+`/api/v1` 路由组。自行构造 Router 时，须同时传入两个中间件以启用完整访问控制：
 
 ```go
 router := api.NewRouter(k8sClient, clientset, addr,
     middleware.Authentication(authenticator),
+    middleware.Authorization(authorizer),
 )
 ```
 
@@ -95,14 +109,15 @@ router := api.NewRouter(k8sClient, clientset, addr,
 `Authorization: Bearer <token>`，不接受 URL 参数传 Token。缺失或格式错误的
 请求头、未通过校验的凭据返回 `401 {"error":"Unauthorized"}`，并携带
 `WWW-Authenticate: Bearer`；认证服务不可用、非预期校验错误、认证超时或取消
-返回 `503 {"error":"Service Unavailable"}`。认证响应不暴露 Token 或底层错误。
+返回 `503 {"error":"Service Unavailable"}`。身份通过但资源权限不足返回
+`403 {"error":"Forbidden"}`。响应不暴露 Token 或底层审查错误。
 
 `/healthz` 与网页静态资源不经过该认证中间件；未注册的 API 路径仍返回 404。
-认证最多使用 3 秒的子 context，调用结束立即释放，后续业务请求及 SSE
-继续使用原请求 context。认证只确认身份，不限制资源访问范围；ServiceAccount
-所属 namespace 不代表 Task 或 Workflow 的隔离边界。
+认证和每个授权阶段分别最多使用 3 秒的子 context，单阶段的多项权限共享该期限；
+调用结束立即释放，业务请求及 SSE 继续使用原请求 context。授权不缓存，每个请求重新检查。
+未开启租户隔离时，Task / Workflow 权限的 Namespace 为空。租户模式见第 1.3 节。
 
-当前只实现身份认证，尚未接入 SubjectAccessReview 授权、API Key 或操作审计。
+**启用后的行为变化**：有效 Token 还必须有相应资源权限；只有 Token、没有角色绑定的账号会收到 403。
 前端在页面上方提供「设置 Token」入口，输入原始 ServiceAccount Token（不含 `Bearer` 前缀）。
 普通 API 与 SSE 日志请求均通过 `Authorization` 请求头发送 Token，不放入 URL。
 Token 仅保存在当前页面内存中，不写入 localStorage/sessionStorage，刷新或关闭页面后需重新输入。
@@ -124,9 +139,9 @@ curl http://localhost:8080/api/v1/tasks \
 envtest，创建临时 ServiceAccount 并通过 TokenRequest 签发 Token，再调用真实
 TokenReview 和业务路由。覆盖匹配 audience 的 200、错误 audience/无效 Token/
 缺少凭据的 401，以及审查客户端缺少 TokenReview 权限时的 503。
-单独运行需要设置 `KUBEBUILDER_ASSETS`。测试还验证了当前业务 RBAC 边界：
-SubjectAccessReview 和直接 Kubernetes 请求均拒绝调用者列出 Task，但认证后的
-业务 HTTP 请求仍返回 200，因为业务 API 尚未接入调用者授权。
+单独运行需要设置 `KUBEBUILDER_ASSETS`。复用同一套件验证资源授权：无角色账号收到 403，
+绑定只读 ClusterRole 后可读取列表和统计，但创建、删除、触发仍返回 403；
+后端缺少 SubjectAccessReview 权限时返回 503。
 
 Token 自然过期是可选慢测：设置 `KUBETASK_TEST_TOKEN_EXPIRY=true`，并使用
 `go test ./internal/api -run '^TestServiceAccountTokenAuthentication$' -count=1 -timeout=15m`。
@@ -135,9 +150,117 @@ Token 自然过期是可选慢测：设置 `KUBETASK_TEST_TOKEN_EXPIRY=true`，�
 这项慢测，不能把普通套件通过描述为自然过期验证通过。
 
 `internal/api/log_stream_test.go` 使用真实 HTTP 连接与可控的上游日志服务，验证
-首条事件立即送达、超过认证的三秒期限后仍可接收事件、认证每个请求只执行一次，
+首条事件立即送达、超过审查的三秒期限后仍可接收事件、每次连接检查一次身份及 Task/Pod 日志权限，
 以及客户端取消会关闭上游日志请求。该测试不启动真实 Pod，也未验证流内 Token
-自然过期后的行为。这些测试不代表实际部署已开启认证或已实现租户隔离。
+自然过期后的行为。这些测试不代表实际部署已开启访问控制。
+
+### 1.2 资源权限要求
+
+以下 Task / Workflow 权限均属于 API group `kubetask.kubetask.io`。未启用租户隔离时使用 ClusterRole +
+ClusterRoleBinding 授予；租户模式使用对应 Namespace 内的 RoleBinding。详情、更新、删除等按 URL 中的名字审查，支持 `resourceNames`；
+创建及当前列表/统计接口按集合审查，不能通过请求体或查询参数缩小授权范围。
+每个接口的全部权限必须在业务操作前通过，新增路由未登记权限时拒绝执行。
+
+| HTTP 操作 | 所需 Kubernetes 权限 |
+| --- | --- |
+| POST tasks / workflows | 对应资源 `create` |
+| GET tasks / workflows 列表 | 对应资源 `list` |
+| GET Task / Workflow 详情 | 对应资源 `get` |
+| PUT Task、POST suspend / resume | 目标 `tasks get + update` |
+| DELETE Task | 目标 `tasks delete` |
+| POST trigger | 目标 `tasks get + update` 及 `tasks/status update` |
+| DELETE Workflow | 目标 `workflows get + delete` |
+| GET stats / stats/trend | `tasks list`（不会返回未经授权的全局统计） |
+| GET Task logs | 目标 `tasks get`；确定 Pod 后，再检查实际 Namespace/Pod 名的核心组 `pods/log get` |
+
+日志在打开上游流之前完成 Pod 授权；Pod 的 get/list 定位操作由后端执行，不额外要求调用者
+具有这些定位权限。已建立的日志流不周期性复查权限，重新连接时重新检查。
+Workflow 创建和删除的子 Task / Job 管理由 Controller 身份执行，不要求调用者另有子资源写权限。
+
+可复用 `config/rbac/task_viewer_role.yaml` / `workflow_viewer_role.yaml` 的只读角色，或
+`task_editor_role.yaml` / `workflow_editor_role.yaml` 的编辑角色。例如，管理员为已有账号绑定任务只读角色：
+
+```bash
+kubectl apply -f config/rbac/task_viewer_role.yaml
+kubectl create clusterrolebinding kubetask-task-reader --clusterrole=task-viewer-role --serviceaccount=team-a:ci
+```
+
+任务编辑及管理员模板已包含 trigger 所需的 `tasks/status update`；查看日志还需在 Job 所在的
+Namespace（旧任务为 `default`）通过 Role/RoleBinding 额外授予核心组 `pods/log get`。
+Workflow 页面跳转子 Task 时，仍需相应 Task 读取权限。角色不由 KubeTask HTTP 接口自动创建或绑定。
+
+### 1.3 Namespace 租户隔离
+
+配置 `tenant-isolation-enabled: true`（环境变量 `KUBETASK_TENANT_ISOLATION_ENABLED`）开启，必须同时开启认证。Helm 使用 `auth.tenantIsolation: true`。
+每个租户使用管理员提前创建的 Namespace 和其中的 ServiceAccount；HTTP 调用不传租户参数。
+使用该 Namespace 内的 RoleBinding 授权，例如：
+
+```bash
+kubectl apply -f config/rbac/task_viewer_role.yaml
+kubectl -n team-a create rolebinding kubetask-task-reader --clusterrole=task-viewer-role --serviceaccount=team-a:ci
+```
+
+KubeTask 用调用者 Namespace 审查资源权限，创建时设置 `kubetask.io/tenant` 标签。Task/Workflow 的列表、统计及按名访问均限制在本租户；RBAC 允许但资源属于其他租户时返回 404。Workflow 子 Task 继承租户，Job/Pod 在租户 Namespace，日志只定位对应执行资源。请求体不能指定或修改租户归属。
+
+Task / Workflow CRD 仍是集群级资源，名字仍全局唯一。该 RoleBinding 供 KubeTask 的 Namespace 审查使用，不会授予直接访问集群级 CR 的权限。租户不应另行获得绕过 KubeTask 的集群级 CR 写权限。无标签的旧资源不会自动迁移，开启隔离后不会出现在租户 API 中；删除或复用 Namespace 名称前需清理原租户的 Task/Workflow。网络隔离、配额和 Pod 安全策略仍由集群管理员按租户配置。
+
+### 1.4 CI/CD API Key
+
+API Key 通过 `Authorization: Bearer <key>` 发送，使用 `ktk_` 前缀。管理员离线生成随机 Key，
+只把完整 Key 的 SHA-256 摘要及绑定身份放入服务端 JSON 文件；原始 Key 存入 CI 的凭据库。
+例如在私有终端生成一组 Key 和摘要：
+
+```bash
+python -c "import secrets,hashlib; k='ktk_'+secrets.token_hex(32); print(k); print(hashlib.sha256(k.encode()).hexdigest())"
+```
+
+用 `kubectl -n team-a get serviceaccount ci -o jsonpath='{.metadata.uid}'` 获取实际 UID，文件 `keys.json` 示例：
+
+```json
+[
+  {
+    "id": "build-ci",
+    "sha256": "<包含 ktk_ 前缀的完整 Key 的小写十六进制 SHA-256>",
+    "namespace": "team-a",
+    "serviceAccount": "ci",
+    "uid": "<ServiceAccount UID>"
+  }
+]
+```
+
+裸进程配置 `auth-api-keys-file`（或 `KUBETASK_AUTH_API_KEYS_FILE`），并开启认证。Helm 挂载部署
+Namespace 中已有的 Secret：
+
+```bash
+kubectl -n kubetask-system create secret generic kubetask-ci-keys --from-file=keys.json
+```
+
+```yaml
+auth:
+  enabled: true
+  audience: kubetask
+  apiKeys:
+    existingSecret:
+      name: kubetask-ci-keys
+      key: keys.json
+```
+
+服务端按请求读取文件，检查绑定的 ServiceAccount 及 UID，再使用该账号的 RBAC 和租户范围。
+Chart 为受管后端账号授予 `serviceaccounts get`；其他部署方式需要为后端账号在绑定的 Namespace
+授予该权限。启用后端读取的是挂载文件，不需要 Kubernetes Secrets API 权限。
+撤销时删除文件条目并更新 Secret；新文件投影到 Pod 后生效，无需重启，Kubernetes 投影存在同步延迟。
+删除或同名重建绑定的 ServiceAccount 也会使旧 Key 失效。未知或已撤销的 Key 返回 401，文件或集群不可用返回 503。
+
+### 1.5 操作审计
+
+开启 `auth-enabled` 后，Task 创建、更新、删除、触发、暂停、恢复及 Workflow 创建、删除会记录
+`events.k8s.io/v1` Event。每个完成的已认证写请求尝试写入一条 Event，包含调用账号、操作、目标和 HTTP 状态，
+包括 RBAC 拒绝；创建成功时使用实际分配的名称。无可信身份的请求不记入此审计。
+
+Event 位于调用者 ServiceAccount 所在 Namespace，可通过 `kubectl -n team-a get events.events.k8s.io` 查看。
+Event 不记录 Token、原始 Key 或请求体；API Key 调用只在注解中记录 Key ID。后端账号需要
+`events.k8s.io/events create`；Chart 和默认 Kustomize 部署提供该权限，外部账号需要自行授权。
+每次写入最多等待一秒，写入失败不改变业务结果；Events 按集群 TTL 保留。
 
 ## 2. 接口总览
 
