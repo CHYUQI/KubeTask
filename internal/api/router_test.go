@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	authenticationv1 "k8s.io/api/authentication/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,6 +31,73 @@ type routerAuthenticatorFunc func(context.Context, string) (*authenticationv1.Us
 
 func (f routerAuthenticatorFunc) Authenticate(ctx context.Context, token string) (*authenticationv1.UserInfo, error) {
 	return f(ctx, token)
+}
+
+type routerAuthorizerFunc func(context.Context, *authenticationv1.UserInfo, authorizationv1.ResourceAttributes) error
+
+func (f routerAuthorizerFunc) Authorize(ctx context.Context, user *authenticationv1.UserInfo, attributes authorizationv1.ResourceAttributes) error {
+	return f(ctx, user, attributes)
+}
+
+func TestRouterAuthorizationProtectsAllAPIRoutes(t *testing.T) {
+	for _, route := range NewRouter(nil, nil, "").engine.Routes() {
+		if !strings.HasPrefix(route.Path, "/api/v1/") {
+			continue
+		}
+		t.Run(route.Method+" "+route.Path, func(t *testing.T) {
+			a := routerAuthenticatorFunc(func(context.Context, string) (*authenticationv1.UserInfo, error) {
+				return &authenticationv1.UserInfo{Username: "system:serviceaccount:team-a:readonly"}, nil
+			})
+			calls := 0
+			z := routerAuthorizerFunc(func(_ context.Context, user *authenticationv1.UserInfo, attributes authorizationv1.ResourceAttributes) error {
+				calls++
+				if user.Username == "" || attributes.Group != kubetaskv1.SchemeGroupVersion.Group || attributes.Namespace != "" {
+					t.Error("authorization lost the authenticated caller or cluster resource scope")
+				}
+				return fmt.Errorf("private review detail: %w", auth.ErrForbidden)
+			})
+			router := NewRouter(nil, nil, "", middleware.Authentication(a), middleware.Authorization(z), func(*gin.Context) {
+				t.Error("forbidden request reached the business handler")
+			})
+			req := httptest.NewRequest(route.Method, strings.ReplaceAll(route.Path, ":name", "example"), nil)
+			req.Header.Set("Authorization", testBearerSecretToken)
+			w := httptest.NewRecorder()
+			router.engine.ServeHTTP(w, req)
+			if calls != 1 || w.Code != http.StatusForbidden || w.Body.String() != `{"error":"Forbidden"}` {
+				t.Errorf("authorization: %d calls, status %d, body %s; want one call and generic 403", calls, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestTriggerChecksStatusPermissionBeforeMutation(t *testing.T) {
+	k8sClient := routerFixtureClient(t)
+	a := routerAuthenticatorFunc(func(context.Context, string) (*authenticationv1.UserInfo, error) {
+		return &authenticationv1.UserInfo{Username: "system:serviceaccount:team-a:editor"}, nil
+	})
+	checks := 0
+	z := routerAuthorizerFunc(func(_ context.Context, _ *authenticationv1.UserInfo, attributes authorizationv1.ResourceAttributes) error {
+		checks++
+		if attributes.Name != "auth-task" {
+			t.Error("authorization lost the target resource name")
+		}
+		if attributes.Subresource == "status" {
+			return auth.ErrForbidden
+		}
+		return nil
+	})
+	router := NewRouter(k8sClient, nil, "", middleware.Authentication(a), middleware.Authorization(z))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/auth-task/trigger", nil)
+	req.Header.Set("Authorization", testBearerSecretToken)
+	w := httptest.NewRecorder()
+	router.engine.ServeHTTP(w, req)
+	task := &kubetaskv1.Task{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Name: "auth-task"}, task); err != nil {
+		t.Fatal(err)
+	}
+	if checks != 3 || w.Code != http.StatusForbidden || task.Annotations["kubetask.io/last-trigger"] != "" {
+		t.Fatal("trigger must check all permissions before changing Task metadata or status")
+	}
 }
 
 func TestRouterAuthenticationProtectsAllAPIRoutes(t *testing.T) {

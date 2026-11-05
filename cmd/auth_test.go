@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	authenticationv1 "k8s.io/api/authentication/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	authenticationclient "k8s.io/client-go/kubernetes/typed/authentication/v1"
 
@@ -32,11 +34,27 @@ func (f startupTokenReviewFunc) Create(
 	return f(ctx, review, opts)
 }
 
+type startupAccessReviewFunc func(
+	context.Context, *authorizationv1.SubjectAccessReview, metav1.CreateOptions,
+) (*authorizationv1.SubjectAccessReview, error)
+
+func (f startupAccessReviewFunc) Create(
+	ctx context.Context, review *authorizationv1.SubjectAccessReview, opts metav1.CreateOptions,
+) (*authorizationv1.SubjectAccessReview, error) {
+	return f(ctx, review, opts)
+}
+
 func TestAuthenticationMiddlewareSetup(t *testing.T) {
 	reviews := startupTokenReviewFunc(func(
 		context.Context, *authenticationv1.TokenReview, metav1.CreateOptions,
 	) (*authenticationv1.TokenReview, error) {
 		t.Fatal("middleware setup must not call Kubernetes")
+		return nil, nil
+	})
+	accessReviews := startupAccessReviewFunc(func(
+		context.Context, *authorizationv1.SubjectAccessReview, metav1.CreateOptions,
+	) (*authorizationv1.SubjectAccessReview, error) {
+		t.Fatal("middleware setup must not submit an access review")
 		return nil, nil
 	})
 	for _, tt := range []struct {
@@ -50,7 +68,7 @@ func TestAuthenticationMiddlewareSetup(t *testing.T) {
 		{name: "disabled without audience", reviews: reviews},
 		{
 			name: "enabled", cfg: config.Config{AuthEnabled: true, AuthAudience: "kubetask"},
-			reviews: reviews, wantSize: 1,
+			reviews: reviews, wantSize: 2,
 		},
 		{
 			name: "enabled without client", cfg: config.Config{AuthEnabled: true, AuthAudience: "kubetask"},
@@ -63,7 +81,7 @@ func TestAuthenticationMiddlewareSetup(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			handlers, err := authenticationMiddleware(&tt.cfg, tt.reviews)
+			handlers, err := authenticationMiddleware(&tt.cfg, tt.reviews, accessReviews)
 			if (err != nil) != tt.wantErr || len(handlers) != tt.wantSize {
 				t.Errorf("authentication setup = (%d handlers, %v), want (%d handlers, error %v)",
 					len(handlers), err, tt.wantSize, tt.wantErr)
@@ -74,7 +92,7 @@ func TestAuthenticationMiddlewareSetup(t *testing.T) {
 
 func TestAuthenticationMiddlewareDisabledAllowsAnonymous(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	handlers, err := authenticationMiddleware(&config.Config{}, nil)
+	handlers, err := authenticationMiddleware(&config.Config{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,6 +127,7 @@ func TestAuthenticationMiddlewareTokenReview(t *testing.T) {
 		status  int
 		calls   int
 		handled bool
+		denied  bool
 	}{
 		{name: "missing credentials", status: http.StatusUnauthorized},
 		{
@@ -130,6 +149,13 @@ func TestAuthenticationMiddlewareTokenReview(t *testing.T) {
 			name: "review failure", header: testBearerToken,
 			err: errors.New("private API failure for opaque-token"), status: http.StatusServiceUnavailable, calls: 1,
 		},
+		{
+			name: "valid token without resource permission", header: testBearerToken,
+			review: authenticationv1.TokenReviewStatus{
+				Authenticated: true, Audiences: []string{testConfiguredAudience}, User: wantUser,
+			},
+			status: http.StatusForbidden, calls: 1, denied: true,
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			calls, handled := 0, false
@@ -144,7 +170,17 @@ func TestAuthenticationMiddlewareTokenReview(t *testing.T) {
 				return &authenticationv1.TokenReview{Status: tt.review}, tt.err
 			})
 			cfg := &config.Config{AuthEnabled: true, AuthAudience: testConfiguredAudience}
-			handlers, err := authenticationMiddleware(cfg, reviews)
+			accessReviews := startupAccessReviewFunc(func(
+				_ context.Context, review *authorizationv1.SubjectAccessReview, _ metav1.CreateOptions,
+			) (*authorizationv1.SubjectAccessReview, error) {
+				if review.Spec.User != wantUser.Username || review.Spec.ResourceAttributes.Resource != "tasks" {
+					t.Error("startup authorization chain lost the caller or resource")
+				}
+				return &authorizationv1.SubjectAccessReview{
+					Status: authorizationv1.SubjectAccessReviewStatus{Allowed: !tt.denied},
+				}, nil
+			})
+			handlers, err := authenticationMiddleware(cfg, reviews, accessReviews)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -169,10 +205,7 @@ func TestAuthenticationMiddlewareTokenReview(t *testing.T) {
 					w.Code, calls, handled, tt.status, tt.calls, tt.handled)
 			}
 			if !tt.handled {
-				wantBody := `{"error":"Unauthorized"}`
-				if tt.status == http.StatusServiceUnavailable {
-					wantBody = `{"error":"Service Unavailable"}`
-				}
+				wantBody := fmt.Sprintf(`{"error":%q}`, http.StatusText(tt.status))
 				if w.Body.String() != wantBody {
 					t.Error("authentication rejection exposed non-generic details")
 				}

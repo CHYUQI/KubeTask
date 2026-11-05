@@ -17,6 +17,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	authenticationclient "k8s.io/client-go/kubernetes/typed/authentication/v1"
+	authorizationclient "k8s.io/client-go/kubernetes/typed/authorization/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -48,7 +49,7 @@ func init() {
 func main() {
 	var configFile string
 	flag.StringVar(&configFile, "config", "", "Path to config file (YAML).")
-	flag.Bool("auth-enabled", false, "Require ServiceAccount Bearer authentication for the HTTP API.")
+	flag.Bool("auth-enabled", false, "Require ServiceAccount authentication and RBAC authorization for the HTTP API.")
 	flag.String("auth-audience", "", "Expected ServiceAccount token audience (required when auth-enabled is true).")
 	// 以下 flag 仅用于注册（避免 flag.Parse 报错），实际值由 Viper 配置接管
 	flag.String("metrics-bind-address", "0", "The address the metrics endpoint binds to.")
@@ -164,12 +165,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	apiMiddleware, err := authenticationMiddleware(cfg, clientset.AuthenticationV1().TokenReviews())
+	apiMiddleware, err := authenticationMiddleware(
+		cfg, clientset.AuthenticationV1().TokenReviews(),
+		clientset.AuthorizationV1().SubjectAccessReviews(),
+	)
 	if err != nil {
 		setupLog.Error(err, "Failed to initialize HTTP API authentication")
 		os.Exit(1)
 	}
-	setupLog.Info("HTTP API authentication configured", "enabled", cfg.AuthEnabled)
+	setupLog.Info("HTTP API authentication and authorization configured", "enabled", cfg.AuthEnabled)
 	router := api.NewRouter(mgr.GetClient(), clientset, apiAddr, apiMiddleware...)
 	if err := router.ServeWeb(cfg.WebDir); err != nil {
 		setupLog.Info("Web UI disabled", "error", err.Error())
@@ -190,19 +194,24 @@ func main() {
 	_ = router.Shutdown(10 * time.Second)
 }
 
-// authenticationMiddleware 在启动阶段构造认证链；关闭时不挂载认证中间件。
-// 构造过程不发送 TokenReview，权限或连接错误由请求阶段返回通用 503。
+// authenticationMiddleware 构造认证及授权链；关闭时保留匿名模式。
+// 构造过程不发送审查请求，权限或连接错误由请求阶段返回通用 503。
 func authenticationMiddleware(
 	cfg *config.Config, reviews authenticationclient.TokenReviewInterface,
+	accessReviews authorizationclient.SubjectAccessReviewInterface,
 ) ([]gin.HandlerFunc, error) {
 	if !cfg.AuthEnabled {
 		return nil, nil
 	}
-	authenticator, err := auth.NewServiceAccountAuthenticator(reviews, cfg.AuthAudience)
+	tokens, err := auth.NewServiceAccountAuthenticator(reviews, cfg.AuthAudience)
 	if err != nil {
 		return nil, fmt.Errorf("initialize API authentication: %w", err)
 	}
-	return []gin.HandlerFunc{middleware.Authentication(authenticator)}, nil
+	authorizer, err := auth.NewResourceAuthorizer(accessReviews)
+	if err != nil {
+		return nil, fmt.Errorf("initialize API authorization: %w", err)
+	}
+	return []gin.HandlerFunc{middleware.Authentication(tokens), middleware.Authorization(authorizer)}, nil
 }
 
 func runStandalone(apiAddr string) {

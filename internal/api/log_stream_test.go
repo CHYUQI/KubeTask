@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	authenticationv1 "k8s.io/api/authentication/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -23,6 +24,8 @@ import (
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
 	"kubetask.io/kubetask/internal/api/middleware"
 )
+
+const testLogNamespace = "default"
 
 func TestAuthenticatedLogStreamContinuesAfterAuthenticationTimeout(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -58,15 +61,23 @@ func TestAuthenticatedLogStreamContinuesAfterAuthenticationTimeout(t *testing.T)
 	}
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
 		&kubetaskv1.Task{Name: "stream-task"},
-		&batchv1.Job{Name: "stream-job", Namespace: "default", Labels: map[string]string{"kubetask.io/task": "stream-task"}},
-		&corev1.Pod{Name: "stream-pod", Namespace: "default", Labels: map[string]string{"job-name": "stream-job"}},
+		&batchv1.Job{Name: "stream-job", Namespace: testLogNamespace, Labels: map[string]string{"kubetask.io/task": "stream-task"}},
+		&corev1.Pod{Name: "stream-pod", Namespace: testLogNamespace, Labels: map[string]string{"job-name": "stream-job"}},
 	).Build()
 	var calls atomic.Int32
 	a := routerAuthenticatorFunc(func(context.Context, string) (*authenticationv1.UserInfo, error) {
 		calls.Add(1)
 		return &authenticationv1.UserInfo{Username: "system:serviceaccount:team-a:ci"}, nil
 	})
-	router := NewRouter(k8sClient, clientset, "", middleware.Authentication(a))
+	var accessCalls atomic.Int32
+	z := routerAuthorizerFunc(func(_ context.Context, _ *authenticationv1.UserInfo, attributes authorizationv1.ResourceAttributes) error {
+		accessCalls.Add(1)
+		if attributes.Resource == "pods" && (attributes.Namespace != testLogNamespace || attributes.Name != "stream-pod" || attributes.Subresource != "log" || attributes.Verb != "get") {
+			t.Error("log authorization must check the actual Pod and namespace")
+		}
+		return nil
+	})
+	router := NewRouter(k8sClient, clientset, "", middleware.Authentication(a), middleware.Authorization(z))
 	server := httptest.NewServer(router.engine)
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -107,6 +118,9 @@ func TestAuthenticatedLogStreamContinuesAfterAuthenticationTimeout(t *testing.T)
 	readEvent("second")
 	if calls.Load() != 1 {
 		t.Errorf("authentication calls = %d, want one per SSE request", calls.Load())
+	}
+	if accessCalls.Load() != 2 {
+		t.Errorf("log authorization calls = %d, want Task and Pod log checks", accessCalls.Load())
 	}
 	cancel()
 	select {

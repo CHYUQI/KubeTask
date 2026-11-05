@@ -31,3 +31,4 @@ rules:
   - tasks/status
   verbs:
   - get
+  - update

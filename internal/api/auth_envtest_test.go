@@ -15,9 +15,11 @@ import (
 	authenticationv1 "k8s.io/api/authentication/v1"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -27,6 +29,11 @@ import (
 	"kubetask.io/kubetask/internal/api/middleware"
 	"kubetask.io/kubetask/internal/auth"
 	"kubetask.io/kubetask/internal/testutil"
+)
+
+const (
+	testTaskResource = "tasks"
+	testListVerb     = "list"
 )
 
 // TestServiceAccountTokenAuthentication uses locally issued, signed ServiceAccount
@@ -150,7 +157,7 @@ func TestServiceAccountTokenAuthentication(t *testing.T) {
 			}
 		})
 	}
-	t.Run("business RBAC is not yet enforced by HTTP API", func(t *testing.T) {
+	t.Run("business RBAC is enforced by HTTP API", func(t *testing.T) {
 		testBusinessRBACBoundary(t, ctx, k8sClient, admin, limitedConfig, audience, validToken)
 	})
 	t.Run("natural token expiration slow test", func(t *testing.T) {
@@ -193,7 +200,7 @@ func testBusinessRBACBoundary(
 			UID:    user.UID,
 			Groups: user.Groups,
 			ResourceAttributes: &authorizationv1.ResourceAttributes{
-				Group: kubetaskv1.SchemeGroupVersion.Group, Resource: "tasks", Verb: "list",
+				Group: kubetaskv1.SchemeGroupVersion.Group, Resource: testTaskResource, Verb: testListVerb,
 			},
 		},
 	}, metav1.CreateOptions{})
@@ -207,13 +214,67 @@ func testBusinessRBACBoundary(
 	if err := limitedClient.List(ctx, &kubetaskv1.TaskList{}); !k8serrors.IsForbidden(err) {
 		t.Fatal("direct Kubernetes Task list must be forbidden")
 	}
-	router := NewRouter(k8sClient, admin, "", middleware.Authentication(a))
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks", nil).WithContext(ctx)
-	req.Header.Set("Authorization", "Bearer "+token)
-	w := httptest.NewRecorder()
-	router.engine.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Errorf("current authentication-only API returned %d, want documented 200 boundary", w.Code)
+	authorizer, err := auth.NewResourceAuthorizer(admin.AuthorizationV1().SubjectAccessReviews())
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewRouter(k8sClient, admin, "", middleware.Authentication(a), middleware.Authorization(authorizer))
+	request := func(engine *Router, method, path string) int {
+		req := httptest.NewRequest(method, path, nil).WithContext(ctx)
+		req.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		engine.engine.ServeHTTP(w, req)
+		return w.Code
+	}
+	if status := request(router, http.MethodGet, "/api/v1/tasks"); status != http.StatusForbidden {
+		t.Fatalf("caller without a role: status %d, want 403", status)
+	}
+	const roleName = "kubetask-api-readonly"
+	if _, err := admin.RbacV1().ClusterRoles().Create(ctx, &rbacv1.ClusterRole{
+		Name:  roleName,
+		Rules: []rbacv1.PolicyRule{{APIGroups: []string{kubetaskv1.SchemeGroupVersion.Group}, Resources: []string{testTaskResource, "workflows"}, Verbs: []string{"get", testListVerb}}},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.RbacV1().ClusterRoleBindings().Create(ctx, &rbacv1.ClusterRoleBinding{
+		Name:     roleName,
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: roleName},
+		Subjects: []rbacv1.Subject{{Kind: "User", APIGroup: rbacv1.GroupName, Name: user.Username}},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := wait.PollUntilContextTimeout(ctx, 50*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		err := authorizer.Authorize(ctx, user, authorizationv1.ResourceAttributes{Group: kubetaskv1.SchemeGroupVersion.Group, Resource: testTaskResource, Verb: testListVerb})
+		return err == nil, nil
+	}); err != nil {
+		t.Fatal("RBAC binding did not become effective")
+	}
+	for _, tt := range []struct {
+		method, path string
+		status       int
+	}{
+		{http.MethodGet, "/api/v1/tasks", http.StatusOK},
+		{http.MethodGet, "/api/v1/stats", http.StatusOK},
+		{http.MethodGet, "/api/v1/workflows", http.StatusOK},
+		{http.MethodPost, "/api/v1/tasks", http.StatusForbidden},
+		{http.MethodDelete, "/api/v1/tasks/example", http.StatusForbidden},
+		{http.MethodPost, "/api/v1/tasks/example/trigger", http.StatusForbidden},
+	} {
+		if status := request(router, tt.method, tt.path); status != tt.status {
+			t.Errorf("readonly caller %s %s: status %d, want %d", tt.method, tt.path, status, tt.status)
+		}
+	}
+	limited, err := kubernetes.NewForConfig(limitedConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limitedAuthorizer, err := auth.NewResourceAuthorizer(limited.AuthorizationV1().SubjectAccessReviews())
+	if err != nil {
+		t.Fatal(err)
+	}
+	limitedRouter := NewRouter(k8sClient, admin, "", middleware.Authentication(a), middleware.Authorization(limitedAuthorizer))
+	if status := request(limitedRouter, http.MethodGet, "/api/v1/tasks"); status != http.StatusServiceUnavailable {
+		t.Errorf("reviewer without SubjectAccessReview permission: status %d, want 503", status)
 	}
 }
 

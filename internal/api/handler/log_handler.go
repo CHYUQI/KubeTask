@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -16,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
+	"kubetask.io/kubetask/internal/api/middleware"
 )
 
 const (
@@ -76,6 +78,11 @@ func (h *LogHandler) Stream(c *gin.Context) {
 	}
 
 	pod := &pods.Items[len(pods.Items)-1]
+	if !middleware.AuthorizeResource(c, authorizationv1.ResourceAttributes{
+		Namespace: pod.Namespace, Version: "v1", Resource: "pods", Subresource: "log", Name: pod.Name, Verb: "get",
+	}) {
+		return
+	}
 
 	tailLines, _ := strconv.ParseInt(tailStr, 10, 64)
 
