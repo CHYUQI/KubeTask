@@ -7,6 +7,7 @@ import (
 
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
 	"kubetask.io/kubetask/internal/naming"
+	"kubetask.io/kubetask/internal/tenant"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -22,7 +23,7 @@ import (
 )
 
 const (
-	taskLabelKey = "kubetask.io/task"
+	taskLabelKey = tenant.TaskLabel
 )
 
 const taskFinalizer = "kubetask.kubetask.io/finalizer"
@@ -121,13 +122,13 @@ func (r *TaskReconciler) handleDeletion(ctx context.Context, task *kubetaskv1.Ta
 	log := ctrlLog.FromContext(ctx)
 	log.Info("Handling Task deletion", "task", task.Name)
 
-	jobs := &batchv1.JobList{}
-	if err := r.List(ctx, jobs, client.MatchingLabels{taskLabelKey: task.Name}); err != nil {
+	jobs, err := tenant.ListTaskJobs(ctx, r.Client, task)
+	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	for i := range jobs.Items {
-		job := &jobs.Items[i]
+	for i := range jobs {
+		job := &jobs[i]
 		if job.DeletionTimestamp.IsZero() {
 			if err := r.Delete(ctx, job, client.PropagationPolicy(metav1.DeletePropagationBackground)); err != nil {
 				if !errors.IsNotFound(err) {
@@ -139,13 +140,13 @@ func (r *TaskReconciler) handleDeletion(ctx context.Context, task *kubetaskv1.Ta
 		}
 	}
 
-	jobs = &batchv1.JobList{}
-	if err := r.List(ctx, jobs, client.MatchingLabels{taskLabelKey: task.Name}); err != nil {
+	jobs, err = tenant.ListTaskJobs(ctx, r.Client, task)
+	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if len(jobs.Items) > 0 {
-		log.Info("Waiting for Jobs to be fully deleted", "task", task.Name, "remaining", len(jobs.Items))
+	if len(jobs) > 0 {
+		log.Info("Waiting for Jobs to be fully deleted", "task", task.Name, "remaining", len(jobs))
 		return ctrl.Result{RequeueAfter: time.Second * 2}, nil
 	}
 
@@ -206,7 +207,7 @@ func (r *TaskReconciler) handleNameTooLong(ctx context.Context, task *kubetaskv1
 func (r *TaskReconciler) handleOneTime(ctx context.Context, task *kubetaskv1.Task) (ctrl.Result, error) {
 	log := ctrlLog.FromContext(ctx)
 
-	if r.jobExists(ctx, task.Name) {
+	if r.jobExists(ctx, task) {
 		log.Info("Job already exists for OneTime task", "task", task.Name)
 		return r.syncJobStatus(ctx, task)
 	}
@@ -224,7 +225,7 @@ func (r *TaskReconciler) handleCron(ctx context.Context, task *kubetaskv1.Task) 
 
 	// Sync Job status before deciding whether to create the next Job, so Cron
 	// tasks also update execution history/completion counters.
-	if r.jobExists(ctx, task.Name) {
+	if r.jobExists(ctx, task) {
 		if _, err := r.syncJobStatus(ctx, task); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -282,7 +283,7 @@ func (r *TaskReconciler) handleDelay(ctx context.Context, task *kubetaskv1.Task)
 		return ctrl.Result{RequeueAfter: waitDuration}, nil
 	}
 
-	if r.jobExists(ctx, task.Name) {
+	if r.jobExists(ctx, task) {
 		log.Info("Job already exists for Delay task", "task", task.Name)
 		return r.syncJobStatus(ctx, task)
 	}
@@ -332,12 +333,9 @@ func (r *TaskReconciler) createJobAndUpdateStatus(ctx context.Context, task *kub
 	return ctrl.Result{}, nil
 }
 
-func (r *TaskReconciler) jobExists(ctx context.Context, taskName string) bool {
-	jobs := &batchv1.JobList{}
-	if err := r.List(ctx, jobs, client.MatchingLabels{taskLabelKey: taskName}); err != nil {
-		return false
-	}
-	return len(jobs.Items) > 0
+func (r *TaskReconciler) jobExists(ctx context.Context, task *kubetaskv1.Task) bool {
+	jobs, err := tenant.ListTaskJobs(ctx, r.Client, task)
+	return err == nil && len(jobs) > 0
 }
 
 func (r *TaskReconciler) constructJob(task *kubetaskv1.Task) (*batchv1.Job, error) {
@@ -359,7 +357,7 @@ func (r *TaskReconciler) constructJob(task *kubetaskv1.Task) (*batchv1.Job, erro
 
 	job := &batchv1.Job{
 		Name:      jobName,
-		Namespace: "default",
+		Namespace: tenant.JobNamespace(task),
 		Labels:    map[string]string{taskLabelKey: task.Name},
 		Spec: batchv1.JobSpec{
 			BackoffLimit: &backoffLimit,
@@ -393,13 +391,13 @@ func (r *TaskReconciler) constructJob(task *kubetaskv1.Task) (*batchv1.Job, erro
 func (r *TaskReconciler) concurrencyAllowed(ctx context.Context, task *kubetaskv1.Task, _ time.Time) bool {
 	log := ctrlLog.FromContext(ctx)
 
-	jobs := &batchv1.JobList{}
-	if err := r.List(ctx, jobs, client.MatchingLabels{taskLabelKey: task.Name}); err != nil {
+	jobs, err := tenant.ListTaskJobs(ctx, r.Client, task)
+	if err != nil {
 		return true
 	}
 
 	active := 0
-	for _, job := range jobs.Items {
+	for _, job := range jobs {
 		if job.Status.Active > 0 {
 			active++
 		}
@@ -416,8 +414,8 @@ func (r *TaskReconciler) concurrencyAllowed(ctx context.Context, task *kubetaskv
 		return false
 	case kubetaskv1.ConcurrencyReplace:
 		log.Info("Replacing active Jobs", "task", task.Name)
-		for i := range jobs.Items {
-			job := &jobs.Items[i]
+		for i := range jobs {
+			job := &jobs[i]
 			if job.Status.Active > 0 {
 				if err := r.Delete(ctx, job, client.PropagationPolicy(metav1.DeletePropagationBackground)); err != nil {
 					log.Error(err, "Failed to delete old Job", "job", job.Name)
@@ -437,12 +435,12 @@ func (r *TaskReconciler) concurrencyAllowed(ctx context.Context, task *kubetaskv
 func (r *TaskReconciler) syncJobStatus(ctx context.Context, task *kubetaskv1.Task) (ctrl.Result, error) {
 	log := ctrlLog.FromContext(ctx)
 
-	jobs := &batchv1.JobList{}
-	if err := r.List(ctx, jobs, client.MatchingLabels{taskLabelKey: task.Name}); err != nil {
+	jobs, err := tenant.ListTaskJobs(ctx, r.Client, task)
+	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	activeJobs := make([]string, 0, len(jobs.Items))
+	activeJobs := make([]string, 0, len(jobs))
 	historyIndex := make(map[string]int, len(task.Status.ExecutionHistory))
 	for i, rec := range task.Status.ExecutionHistory {
 		historyIndex[rec.JobName] = i
@@ -450,8 +448,8 @@ func (r *TaskReconciler) syncJobStatus(ctx context.Context, task *kubetaskv1.Tas
 
 	statusDirty := false
 
-	for i := range jobs.Items {
-		job := &jobs.Items[i]
+	for i := range jobs {
+		job := &jobs[i]
 		if !r.jobTransitioned(job) {
 			// A Job remains in progress between retry Pods, when Active may be zero.
 			activeJobs = append(activeJobs, job.Name)

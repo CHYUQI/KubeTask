@@ -20,6 +20,7 @@ auth:
   enabled: false
   # Required when enabled; use the same audience when issuing caller tokens.
   audience: ""
+  tenantIsolation: false
 
 # URL is injected from an existing Secret; restart Pods after changing it.
 webhook:

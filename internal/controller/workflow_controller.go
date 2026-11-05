@@ -25,6 +25,7 @@ import (
 	"time"
 
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
+	"kubetask.io/kubetask/internal/tenant"
 	"kubetask.io/kubetask/internal/workflow"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -158,7 +159,7 @@ func (r *WorkflowReconciler) handleDeletion(ctx context.Context, wf *kubetaskv1.
 			remaining++
 			continue
 		}
-		if err := r.Delete(ctx, child, client.PropagationPolicy(metav1.DeletePropagationBackground)); err != nil {
+		if err := r.Delete(ctx, child, client.PropagationPolicy(metav1.DeletePropagationBackground), client.Preconditions{UID: new(child.UID)}); err != nil {
 			if !errors.IsNotFound(err) {
 				log.Error(err, "Failed to delete child Task", "workflow", wf.Name, "task", child.Name)
 				return ctrl.Result{}, err
@@ -473,15 +474,22 @@ func childTaskSpec(wf *kubetaskv1.Workflow, graph *workflow.Graph, nodeName stri
 
 // listChildTasks 一次列出某个 Workflow 的全部子 Task（按 label 归属）。
 func (r *WorkflowReconciler) listChildTasks(ctx context.Context, wf *kubetaskv1.Workflow) (map[string]*kubetaskv1.Task, error) {
+	namespace := wf.Labels[tenant.Label]
+	labels := client.MatchingLabels{workflowLabel: wf.Name}
+	if namespace != "" {
+		labels[tenant.Label] = namespace
+	}
 	tasks := &kubetaskv1.TaskList{}
-	if err := r.List(ctx, tasks, client.MatchingLabels{workflowLabel: wf.Name}); err != nil {
+	if err := r.List(ctx, tasks, labels); err != nil {
 		return nil, err
 	}
 
 	children := make(map[string]*kubetaskv1.Task, len(tasks.Items))
 	for i := range tasks.Items {
 		task := &tasks.Items[i]
-		children[task.Name] = task
+		if task.Labels[tenant.Label] == namespace && metav1.IsControlledBy(task, wf) {
+			children[task.Name] = task
+		}
 	}
 	return children, nil
 }
@@ -500,6 +508,7 @@ func (r *WorkflowReconciler) createChildTask(ctx context.Context, wf *kubetaskv1
 		},
 		Spec: childTaskSpec(wf, graph, nodeName),
 	}
+	tenant.SetNamespace(task, wf.Labels[tenant.Label])
 
 	if err := controllerutil.SetControllerReference(wf, task, r.Scheme); err != nil {
 		return nil, fmt.Errorf("failed to set owner reference on task %q: %w", name, err)
@@ -514,7 +523,7 @@ func (r *WorkflowReconciler) createChildTask(ctx context.Context, wf *kubetaskv1
 		if getErr := r.Get(ctx, client.ObjectKey{Name: name}, existing); getErr != nil {
 			return nil, getErr
 		}
-		if !metav1.IsControlledBy(existing, wf) {
+		if existing.Labels[tenant.Label] != wf.Labels[tenant.Label] || !metav1.IsControlledBy(existing, wf) {
 			return nil, fmt.Errorf("%w: task %q already exists and is not controlled by workflow %q",
 				errTaskNameConflict, name, wf.Name)
 		}

@@ -8,10 +8,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/robfig/cron/v3"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
+	"kubetask.io/kubetask/internal/tenant"
 )
 
 const (
@@ -62,6 +62,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		}
 	}
 
+	prepareTenantCreate(c.Request.Context(), &task)
 	if err := h.client.Create(c.Request.Context(), &task); err != nil {
 		if errors.IsAlreadyExists(err) {
 			c.JSON(http.StatusConflict, gin.H{jsonKeyError: "task already exists"})
@@ -90,7 +91,7 @@ func (h *TaskHandler) List(c *gin.Context) {
 	filterPhase := c.Query("phase")
 
 	tasks := &kubetaskv1.TaskList{}
-	if err := h.client.List(c.Request.Context(), tasks); err != nil {
+	if err := h.client.List(c.Request.Context(), tasks, tenantListOptions(c.Request.Context())...); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
@@ -137,7 +138,7 @@ func (h *TaskHandler) Get(c *gin.Context) {
 	name := c.Param("name")
 
 	task := &kubetaskv1.Task{}
-	if err := h.client.Get(c.Request.Context(), types.NamespacedName{Name: name}, task); err != nil {
+	if err := getTenantObject(c.Request.Context(), h.client, taskResource, name, task); err != nil {
 		if errors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: taskNotFoundMessage})
 			return
@@ -156,7 +157,7 @@ func (h *TaskHandler) Update(c *gin.Context) {
 	name := c.Param("name")
 
 	existing := &kubetaskv1.Task{}
-	if err := h.client.Get(c.Request.Context(), types.NamespacedName{Name: name}, existing); err != nil {
+	if err := getTenantObject(c.Request.Context(), h.client, taskResource, name, existing); err != nil {
 		if errors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: taskNotFoundMessage})
 			return
@@ -178,7 +179,9 @@ func (h *TaskHandler) Update(c *gin.Context) {
 	}
 
 	existing.Spec = updated.Spec
+	namespace := existing.Labels[tenant.Label]
 	existing.Labels = updated.Labels
+	tenant.SetNamespace(existing, namespace)
 	existing.Annotations = updated.Annotations
 
 	if err := h.client.Update(c.Request.Context(), existing); err != nil {
@@ -193,13 +196,25 @@ func (h *TaskHandler) Update(c *gin.Context) {
 // DELETE /api/v1/tasks/:name
 // ==========================================================================
 func (h *TaskHandler) Delete(c *gin.Context) {
+	ctx := c.Request.Context()
 	name := c.Param("name")
 
 	task := &kubetaskv1.Task{
 		Name: name,
 	}
 
-	if err := h.client.Delete(c.Request.Context(), task); err != nil {
+	if tenant.Namespace(ctx) != "" {
+		if err := getTenantObject(ctx, h.client, taskResource, name, task); err != nil {
+			if errors.IsNotFound(err) {
+				c.JSON(http.StatusNotFound, gin.H{jsonKeyError: taskNotFoundMessage})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
+			return
+		}
+	}
+
+	if err := h.client.Delete(ctx, task, tenantDeleteOptions(ctx, task)...); err != nil {
 		if errors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: taskNotFoundMessage})
 			return
@@ -218,7 +233,7 @@ func (h *TaskHandler) Trigger(c *gin.Context) {
 	name := c.Param("name")
 
 	task := &kubetaskv1.Task{}
-	if err := h.client.Get(c.Request.Context(), types.NamespacedName{Name: name}, task); err != nil {
+	if err := getTenantObject(c.Request.Context(), h.client, taskResource, name, task); err != nil {
 		if errors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: taskNotFoundMessage})
 			return
@@ -253,7 +268,7 @@ func (h *TaskHandler) Trigger(c *gin.Context) {
 // ==========================================================================
 func (h *TaskHandler) Stats(c *gin.Context) {
 	tasks := &kubetaskv1.TaskList{}
-	if err := h.client.List(c.Request.Context(), tasks); err != nil {
+	if err := h.client.List(c.Request.Context(), tasks, tenantListOptions(c.Request.Context())...); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
@@ -304,7 +319,7 @@ func (h *TaskHandler) Suspend(c *gin.Context) {
 	name := c.Param("name")
 
 	task := &kubetaskv1.Task{}
-	if err := h.client.Get(c.Request.Context(), types.NamespacedName{Name: name}, task); err != nil {
+	if err := getTenantObject(c.Request.Context(), h.client, taskResource, name, task); err != nil {
 		if errors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: taskNotFoundMessage})
 			return
@@ -331,7 +346,7 @@ func (h *TaskHandler) Resume(c *gin.Context) {
 	name := c.Param("name")
 
 	task := &kubetaskv1.Task{}
-	if err := h.client.Get(c.Request.Context(), types.NamespacedName{Name: name}, task); err != nil {
+	if err := getTenantObject(c.Request.Context(), h.client, taskResource, name, task); err != nil {
 		if errors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: taskNotFoundMessage})
 			return
@@ -356,7 +371,7 @@ func (h *TaskHandler) Resume(c *gin.Context) {
 // ==========================================================================
 func (h *TaskHandler) Trend(c *gin.Context) {
 	tasks := &kubetaskv1.TaskList{}
-	if err := h.client.List(c.Request.Context(), tasks); err != nil {
+	if err := h.client.List(c.Request.Context(), tasks, tenantListOptions(c.Request.Context())...); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}

@@ -7,7 +7,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
@@ -54,6 +53,7 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 		return
 	}
 
+	prepareTenantCreate(c.Request.Context(), &wf)
 	if err := h.client.Create(c.Request.Context(), &wf); err != nil {
 		switch {
 		case errors.IsAlreadyExists(err):
@@ -87,7 +87,7 @@ func (h *WorkflowHandler) List(c *gin.Context) {
 	filterPhase := c.Query("phase")
 
 	workflows := &kubetaskv1.WorkflowList{}
-	if err := h.client.List(c.Request.Context(), workflows); err != nil {
+	if err := h.client.List(c.Request.Context(), workflows, tenantListOptions(c.Request.Context())...); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
@@ -127,7 +127,7 @@ func (h *WorkflowHandler) Get(c *gin.Context) {
 	name := c.Param("name")
 
 	wf := &kubetaskv1.Workflow{}
-	if err := h.client.Get(c.Request.Context(), types.NamespacedName{Name: name}, wf); err != nil {
+	if err := getTenantObject(c.Request.Context(), h.client, workflowResource, name, wf); err != nil {
 		if errors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: workflowNotFoundMessage})
 			return
@@ -151,7 +151,7 @@ func (h *WorkflowHandler) Delete(c *gin.Context) {
 	name := c.Param("name")
 
 	wf := &kubetaskv1.Workflow{}
-	if err := h.client.Get(c.Request.Context(), types.NamespacedName{Name: name}, wf); err != nil {
+	if err := getTenantObject(c.Request.Context(), h.client, workflowResource, name, wf); err != nil {
 		if errors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: workflowNotFoundMessage})
 			return
@@ -160,7 +160,7 @@ func (h *WorkflowHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := h.client.Delete(c.Request.Context(), wf); err != nil {
+	if err := h.client.Delete(c.Request.Context(), wf, tenantDeleteOptions(c.Request.Context(), wf)...); err != nil {
 		if errors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: workflowNotFoundMessage})
 			return

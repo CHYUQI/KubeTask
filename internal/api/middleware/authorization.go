@@ -65,7 +65,7 @@ func Authorization(authorizer Authorizer) gin.HandlerFunc {
 			attributes = append(attributes, authorizationv1.ResourceAttributes{
 				Group: kubetaskv1.SchemeGroupVersion.Group, Version: kubetaskv1.SchemeGroupVersion.Version,
 				Resource: permission.resource, Verb: permission.verb, Subresource: permission.subresource,
-				Name: c.Param("name"),
+				Name: c.Param("name"), Namespace: TenantNamespace(c),
 			})
 		}
 		if !checkResourceAccess(c, authorizer, attributes...) {

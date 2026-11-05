@@ -5,19 +5,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	authorizationv1 "k8s.io/api/authorization/v1"
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
 	"kubetask.io/kubetask/internal/api/middleware"
+	"kubetask.io/kubetask/internal/tenant"
 )
 
 const (
@@ -41,7 +42,7 @@ func (h *LogHandler) Stream(c *gin.Context) {
 	sinceSeconds := c.DefaultQuery("sinceSeconds", "")
 
 	task := &kubetaskv1.Task{}
-	if err := h.client.Get(c.Request.Context(), types.NamespacedName{Name: taskName}, task); err != nil {
+	if err := getTenantObject(c.Request.Context(), h.client, taskResource, taskName, task); err != nil {
 		if k8serrors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{jsonKeyError: taskNotFoundMessage})
 			return
@@ -50,18 +51,18 @@ func (h *LogHandler) Stream(c *gin.Context) {
 		return
 	}
 
-	jobs := &batchv1.JobList{}
-	if err := h.client.List(c.Request.Context(), jobs, client.MatchingLabels{"kubetask.io/task": taskName}); err != nil {
+	jobs, err := tenant.ListTaskJobs(c.Request.Context(), h.client, task)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{jsonKeyError: err.Error()})
 		return
 	}
 
-	if len(jobs.Items) == 0 {
+	if len(jobs) == 0 {
 		c.JSON(http.StatusNotFound, gin.H{jsonKeyError: "no jobs found for task"})
 		return
 	}
 
-	job := jobs.Items[len(jobs.Items)-1]
+	job := &jobs[len(jobs)-1]
 
 	pods := &corev1.PodList{}
 	if err := h.client.List(c.Request.Context(), pods,
@@ -72,6 +73,11 @@ func (h *LogHandler) Stream(c *gin.Context) {
 		return
 	}
 
+	if task.Labels[tenant.Label] != "" {
+		pods.Items = slices.DeleteFunc(pods.Items, func(pod corev1.Pod) bool {
+			return !metav1.IsControlledBy(&pod, job)
+		})
+	}
 	if len(pods.Items) == 0 {
 		c.JSON(http.StatusNotFound, gin.H{jsonKeyError: "no pods found for job"})
 		return

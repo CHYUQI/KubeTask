@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -31,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
+	"kubetask.io/kubetask/internal/tenant"
 )
 
 const (
@@ -180,6 +182,28 @@ func newWorkflow(name string) *kubetaskv1.Workflow {
 // ---------------------------------------------------------------------------
 
 var _ = Describe("Workflow Controller", func() {
+	It("places a tenant Workflow's child Job in the tenant Namespace", func() {
+		const name = "wf-tenant-placement"
+		namespace := &corev1.Namespace{Name: name}
+		Expect(k8sClient.Create(ctx, namespace)).To(Succeed())
+		DeferCleanup(func() { Expect(k8sClient.Delete(ctx, namespace)).To(Succeed()) })
+
+		wf := newWorkflow(name)
+		tenant.SetNamespace(wf, namespace.Name)
+		createWorkflow(wf)
+		DeferCleanup(cleanupWorkflow, name)
+		reconcileWorkflow(name, 1)
+
+		child := getChildTask(name + "-" + testBuildNode)
+		Expect(child).NotTo(BeNil())
+		Expect(child.Labels).To(HaveKeyWithValue(tenant.Label, namespace.Name))
+		DeferCleanup(cleanupTask, child.Name)
+		reconcileUntilStable(newTestReconciler(), child.Name)
+
+		jobs := listJobs(child.Name)
+		Expect(jobs.Items).To(HaveLen(1))
+		Expect(jobs.Items[0].Namespace).To(Equal(namespace.Name))
+	})
 
 	// =========================================================================
 	// 正向调度

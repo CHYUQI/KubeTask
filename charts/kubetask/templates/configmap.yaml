@@ -2,6 +2,9 @@
 {{- if .Values.auth.enabled -}}
 {{- $authAudience = required "auth.audience is required when auth.enabled is true" $authAudience -}}
 {{- end -}}
+{{- if and .Values.auth.tenantIsolation (not .Values.auth.enabled) -}}
+{{- fail "auth.tenantIsolation requires auth.enabled" -}}
+{{- end -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -16,6 +19,7 @@ data:
     api-host: {{ .Values.api.host }}
     auth-enabled: {{ .Values.auth.enabled }}
     auth-audience: {{ $authAudience | quote }}
+    tenant-isolation-enabled: {{ .Values.auth.tenantIsolation }}
     webhook-enabled: {{ .Values.webhook.enabled }}
     webhook-timeout: {{ .Values.webhook.timeout | quote }}
     webhook-max-retries: {{ .Values.webhook.maxRetries }}

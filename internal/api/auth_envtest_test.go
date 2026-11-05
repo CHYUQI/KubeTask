@@ -157,6 +157,9 @@ func TestServiceAccountTokenAuthentication(t *testing.T) {
 			}
 		})
 	}
+	t.Run("namespace role scopes access through KubeTask", func(t *testing.T) {
+		testTenantBoundary(t, ctx, k8sClient, admin, limitedConfig, namespace, account, audience, validToken)
+	})
 	t.Run("business RBAC is enforced by HTTP API", func(t *testing.T) {
 		testBusinessRBACBoundary(t, ctx, k8sClient, admin, limitedConfig, audience, validToken)
 	})

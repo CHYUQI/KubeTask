@@ -211,7 +211,11 @@ func authenticationMiddleware(
 	if err != nil {
 		return nil, fmt.Errorf("initialize API authorization: %w", err)
 	}
-	return []gin.HandlerFunc{middleware.Authentication(tokens), middleware.Authorization(authorizer)}, nil
+	handlers := []gin.HandlerFunc{middleware.Authentication(tokens)}
+	if cfg.TenantIsolationEnabled {
+		handlers = append(handlers, middleware.TenantIsolation())
+	}
+	return append(handlers, middleware.Authorization(authorizer)), nil
 }
 
 func runStandalone(apiAddr string) {
