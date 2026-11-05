@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -132,12 +133,42 @@ func testTenantBoundary(
 	}
 	keys := auth.NewAPIKeyAuthenticator(authenticator, admin.CoreV1(), keysPath)
 	router = NewRouter(k8sClient, admin, "", middleware.Authentication(keys), middleware.TenantIsolation(),
-		middleware.Authorization(authorizer))
+		middleware.Audit(admin.EventsV1()), middleware.Authorization(authorizer))
 	token = key
 	if w := request(ctx, http.MethodGet, tasksPath, ""); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), ownerLabel) {
 		t.Errorf("API Key did not receive its ServiceAccount tenant access: %d %s", w.Code, w.Body.String())
 	}
 	if w := request(ctx, http.MethodGet, tasksPath+"/"+foreignTask.Name, ""); w.Code != http.StatusNotFound {
 		t.Errorf("API Key must not see another tenant's Task, got %d", w.Code)
+	}
+	createdResponse := request(ctx, http.MethodPost, tasksPath, `{"spec":{"type":"OneTime","image":"busybox"}}`)
+	if createdResponse.Code != http.StatusCreated {
+		t.Fatalf("API Key create: status %d, want 201", createdResponse.Code)
+	}
+	var created kubetaskv1.Task
+	if err := json.Unmarshal(createdResponse.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if w := request(ctx, http.MethodPost, tasksPath+"/"+created.Name+"/trigger", ""); w.Code != http.StatusForbidden {
+		t.Fatalf("trigger without status update permission: status %d, want 403", w.Code)
+	}
+	events, err := admin.EventsV1().Events(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events.Items) != 2 {
+		t.Fatalf("want an Event for each allowed or denied write, got %d", len(events.Items))
+	}
+	want := map[string]string{"Create": "APIRequestSucceeded", "Trigger": "APIRequestDenied"}
+	for _, event := range events.Items {
+		if want[event.Action] != event.Reason || event.Related == nil || event.Related.Name != created.Name ||
+			event.Regarding.Name != account || event.Regarding.Namespace != namespace || event.Regarding.UID != accountObject.UID ||
+			event.Annotations[auth.APIKeyIDExtra] != "ci" || strings.Contains(event.Note, key) {
+			t.Errorf("audit Event for %s did not identify the expected actor, target or outcome", event.Action)
+		}
+		if event.Action == "Create" && event.Related != nil && event.Related.UID != created.UID {
+			t.Error("create audit Event must contain the API-server-assigned target UID")
+		}
+		delete(want, event.Action)
 	}
 }

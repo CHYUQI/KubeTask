@@ -10,6 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	kubetaskv1 "kubetask.io/kubetask/api/v1"
+	"kubetask.io/kubetask/internal/api/middleware"
 	"kubetask.io/kubetask/internal/workflow"
 )
 
@@ -67,6 +68,7 @@ func (h *WorkflowHandler) Create(c *gin.Context) {
 		return
 	}
 
+	middleware.SetAuditTarget(c, &wf)
 	c.JSON(http.StatusCreated, wf)
 }
 

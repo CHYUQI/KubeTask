@@ -68,7 +68,7 @@ func TestAuthenticationMiddlewareSetup(t *testing.T) {
 		{name: "disabled without audience", reviews: reviews},
 		{
 			name: "enabled", cfg: config.Config{AuthEnabled: true, AuthAudience: "kubetask"},
-			reviews: reviews, wantSize: 2,
+			reviews: reviews, wantSize: 3,
 		},
 		{
 			name: "enabled without client", cfg: config.Config{AuthEnabled: true, AuthAudience: "kubetask"},
@@ -81,7 +81,7 @@ func TestAuthenticationMiddlewareSetup(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			handlers, err := authenticationMiddleware(&tt.cfg, tt.reviews, accessReviews, nil)
+			handlers, err := authenticationMiddleware(&tt.cfg, tt.reviews, accessReviews, nil, nil)
 			if (err != nil) != tt.wantErr || len(handlers) != tt.wantSize {
 				t.Errorf("authentication setup = (%d handlers, %v), want (%d handlers, error %v)",
 					len(handlers), err, tt.wantSize, tt.wantErr)
@@ -92,7 +92,7 @@ func TestAuthenticationMiddlewareSetup(t *testing.T) {
 
 func TestAuthenticationMiddlewareDisabledAllowsAnonymous(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	handlers, err := authenticationMiddleware(&config.Config{}, nil, nil, nil)
+	handlers, err := authenticationMiddleware(&config.Config{}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestAuthenticationMiddlewareTokenReview(t *testing.T) {
 					Status: authorizationv1.SubjectAccessReviewStatus{Allowed: !tt.denied},
 				}, nil
 			})
-			handlers, err := authenticationMiddleware(cfg, reviews, accessReviews, nil)
+			handlers, err := authenticationMiddleware(cfg, reviews, accessReviews, nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

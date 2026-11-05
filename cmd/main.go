@@ -19,6 +19,7 @@ import (
 	authenticationclient "k8s.io/client-go/kubernetes/typed/authentication/v1"
 	authorizationclient "k8s.io/client-go/kubernetes/typed/authorization/v1"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
+	eventsclient "k8s.io/client-go/kubernetes/typed/events/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -169,6 +170,7 @@ func main() {
 	apiMiddleware, err := authenticationMiddleware(
 		cfg, clientset.AuthenticationV1().TokenReviews(),
 		clientset.AuthorizationV1().SubjectAccessReviews(), clientset.CoreV1(),
+		clientset.EventsV1(),
 	)
 	if err != nil {
 		setupLog.Error(err, "Failed to initialize HTTP API authentication")
@@ -201,6 +203,7 @@ func authenticationMiddleware(
 	cfg *config.Config, reviews authenticationclient.TokenReviewInterface,
 	accessReviews authorizationclient.SubjectAccessReviewInterface,
 	accounts corev1client.ServiceAccountsGetter,
+	events eventsclient.EventsGetter,
 ) ([]gin.HandlerFunc, error) {
 	if !cfg.AuthEnabled {
 		return nil, nil
@@ -221,7 +224,7 @@ func authenticationMiddleware(
 	if cfg.TenantIsolationEnabled {
 		handlers = append(handlers, middleware.TenantIsolation())
 	}
-	return append(handlers, middleware.Authorization(authorizer)), nil
+	return append(handlers, middleware.Audit(events), middleware.Authorization(authorizer)), nil
 }
 
 func runStandalone(apiAddr string) {
