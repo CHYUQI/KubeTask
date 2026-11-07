@@ -39,8 +39,8 @@ func TestDeliveryRetriesStablePayload(t *testing.T) {
 		w.WriteHeader(statuses[len(bodies)-1])
 	}))
 	defer server.Close()
-	d := newDispatcher(nil, Options{URL: server.URL, Timeout: time.Second, MaxRetries: 3}, logr.Discard())
-	defer d.webhook.client.CloseIdleConnections()
+	d := newDispatcher(nil, newWebhook(Options{URL: server.URL, Timeout: time.Second}), 3, logr.Discard())
+	defer d.sender.close()
 	var delays []time.Duration
 	d.wait = func(_ context.Context, delay time.Duration) bool { delays = append(delays, delay); return true }
 	if state := d.deliver(context.Background(), testEvent(t)); state != stateDelivered {
@@ -77,8 +77,8 @@ func TestDeliveryStopsOnRejectionAndExhaustion(t *testing.T) {
 				w.WriteHeader(tt.status)
 			}))
 			defer server.Close()
-			d := newDispatcher(nil, Options{URL: server.URL, Timeout: time.Second, MaxRetries: tt.retries}, logr.Discard())
-			defer d.webhook.client.CloseIdleConnections()
+			d := newDispatcher(nil, newWebhook(Options{URL: server.URL, Timeout: time.Second}), tt.retries, logr.Discard())
+			defer d.sender.close()
 			d.wait = func(context.Context, time.Duration) bool { return true }
 			if state := d.deliver(context.Background(), testEvent(t)); state != tt.state || int(attempts.Load()) != tt.attempts {
 				t.Fatalf("state=%q attempts=%d, want %q/%d", state, attempts.Load(), tt.state, tt.attempts)
@@ -119,7 +119,7 @@ func TestWebhookTimeoutAndCanceledRetry(t *testing.T) {
 }
 
 func TestQueueBoundAndConcurrentDeduplication(t *testing.T) {
-	d := newDispatcher(nil, Options{Timeout: time.Second}, logr.Discard())
+	d := newDispatcher(nil, newWebhook(Options{Timeout: time.Second}), 0, logr.Discard())
 	e := testEvent(t)
 	var accepted atomic.Int32
 	var producers sync.WaitGroup
@@ -151,7 +151,7 @@ func TestQueueBoundAndConcurrentDeduplication(t *testing.T) {
 }
 
 func TestCompletedEvictionPreservesPending(t *testing.T) {
-	d := newDispatcher(nil, Options{Timeout: time.Second}, logr.Discard())
+	d := newDispatcher(nil, newWebhook(Options{Timeout: time.Second}), 0, logr.Discard())
 	now := time.Now()
 	d.now = func() time.Time { return now }
 	pending := testEvent(t)
@@ -191,7 +191,7 @@ func TestDispatcherCancelsInflightAndStopsAccepting(t *testing.T) {
 	}))
 	defer server.Close()
 	defer close(release)
-	d := newDispatcher(nil, Options{URL: server.URL, Timeout: time.Minute, MaxRetries: 3}, logr.Discard())
+	d := newDispatcher(nil, newWebhook(Options{URL: server.URL, Timeout: time.Minute}), 3, logr.Discard())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan struct{})
@@ -220,7 +220,7 @@ func TestDispatcherCancelsInflightAndStopsAccepting(t *testing.T) {
 func TestFailureLogsDoNotExposeWebhookURL(t *testing.T) {
 	var logs bytes.Buffer
 	log := zapr.NewLogger(zap.New(zapcore.NewCore(zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()), zapcore.AddSync(&logs), zap.InfoLevel)))
-	d := newDispatcher(nil, Options{URL: "https://invalid.example/hook?secret=private-token", Timeout: time.Second}, log)
+	d := newDispatcher(nil, newWebhook(Options{URL: "https://invalid.example/hook?secret=private-token", Timeout: time.Second}), 0, log)
 	// An invalid header causes the real transport to reject the request before networking;
 	// url.Error still includes the complete secret-bearing target URL.
 	e := testEvent(t)

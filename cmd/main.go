@@ -149,6 +149,19 @@ func main() {
 		}
 	}
 	setupLog.Info("Outbound webhook notifications configured", "enabled", cfg.WebhookEnabled)
+	if cfg.SMTPEnabled {
+		if err := notification.SetupSMTPWithManager(mgr, notification.SMTPOptions{
+			Address: cfg.SMTPAddress, TLSMode: cfg.SMTPTLS,
+			Username: cfg.SMTPUsername, Password: cfg.SMTPPassword,
+			From: cfg.SMTPFrom, To: cfg.SMTPTo,
+			Timeout: cfg.SMTPTimeout, MaxRetries: cfg.SMTPMaxRetries,
+			SubjectTemplate: cfg.SMTPSubjectTemplate, BodyTemplate: cfg.SMTPBodyTemplate,
+		}); err != nil {
+			setupLog.Error(err, "Failed to setup email notifications")
+			os.Exit(1)
+		}
+	}
+	setupLog.Info("Email notifications configured", "enabled", cfg.SMTPEnabled)
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "Failed to add health check")

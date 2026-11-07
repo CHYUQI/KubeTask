@@ -3,7 +3,6 @@ package notification
 import (
 	"container/list"
 	"context"
-	"encoding/json"
 	"errors"
 	"sync"
 	"time"
@@ -25,9 +24,22 @@ const (
 )
 
 var (
-	errQueueFull = errors.New("webhook queue is full")
-	errDelivery  = errors.New("webhook delivery failed")
+	errQueueFull = errors.New("notification queue is full")
+	errDelivery  = errors.New("notification delivery failed")
 )
+
+type sender interface {
+	encode(Event) ([]byte, error)
+	send(context.Context, string, []byte) attemptResult
+	close()
+}
+
+type attemptResult struct {
+	status    int
+	delivered bool
+	retry     bool
+	reason    string
+}
 
 type completedEvent struct {
 	id string
@@ -41,7 +53,7 @@ type deliveryRecord struct {
 type dispatcher struct {
 	queue      chan Event
 	reader     client.Reader
-	webhook    *webhook
+	sender     sender
 	maxRetries int
 	log        logr.Logger
 	now        func() time.Time
@@ -53,10 +65,10 @@ type dispatcher struct {
 	completed *list.List
 }
 
-func newDispatcher(reader client.Reader, opts Options, log logr.Logger) *dispatcher {
+func newDispatcher(reader client.Reader, channel sender, maxRetries int, log logr.Logger) *dispatcher {
 	return &dispatcher{
 		queue: make(chan Event, queueCapacity), reader: reader,
-		webhook: newWebhook(opts), maxRetries: opts.MaxRetries, log: log,
+		sender: channel, maxRetries: maxRetries, log: log,
 		now: time.Now, wait: waitRetry,
 		records: make(map[string]deliveryRecord), completed: list.New(),
 	}
@@ -82,7 +94,7 @@ func (d *dispatcher) enqueue(e Event) bool {
 		return true
 	default:
 		d.mu.Unlock()
-		d.log.Error(errQueueFull, "Webhook event dropped", "eventID", e.ID, "task", e.Task.Name,
+		d.log.Error(errQueueFull, "Notification event dropped", "eventID", e.ID, "task", e.Task.Name,
 			"job", e.Execution.JobName, "reason", "queue_full")
 		return false
 	}
@@ -113,7 +125,7 @@ func (d *dispatcher) finish(id, state string) {
 }
 
 func (d *dispatcher) run(ctx context.Context) {
-	defer d.webhook.client.CloseIdleConnections()
+	defer d.sender.close()
 	var workers sync.WaitGroup
 	for range workerCount {
 		workers.Go(func() {
@@ -149,16 +161,16 @@ func (d *dispatcher) run(ctx context.Context) {
 		}
 	}
 	d.mu.Unlock()
-	d.log.Info("Webhook dispatcher stopped", "unfinished", unfinished)
+	d.log.Info("Notification dispatcher stopped", "unfinished", unfinished)
 }
 
 func (d *dispatcher) deliver(ctx context.Context, e Event) string {
 	if d.reader != nil {
 		enrich(ctx, d.reader, &e)
 	}
-	body, err := json.Marshal(e)
+	body, err := d.sender.encode(e)
 	if err != nil {
-		d.log.Error(errDelivery, "Webhook event encoding failed", "eventID", e.ID, "reason", "encode_error")
+		d.log.Error(errDelivery, "Notification event encoding failed", "eventID", e.ID, "reason", "encode_error")
 		return stateRejected
 	}
 	log := d.log.WithValues("eventID", e.ID, "task", e.Task.Name, "job", e.Execution.JobName)
@@ -166,16 +178,16 @@ func (d *dispatcher) deliver(ctx context.Context, e Event) string {
 		if ctx.Err() != nil {
 			return ""
 		}
-		result := d.webhook.send(ctx, e.ID, body)
+		result := d.sender.send(ctx, e.ID, body)
 		if ctx.Err() != nil {
 			return ""
 		}
-		if result.status >= 200 && result.status <= 299 {
-			log.Info("Webhook delivered", "attempts", attempt+1, "statusCode", result.status)
+		if result.delivered {
+			log.Info("Notification delivered", "attempts", attempt+1, "statusCode", result.status)
 			return stateDelivered
 		}
 		if !result.retry || attempt == d.maxRetries {
-			log.Error(errDelivery, "Webhook delivery stopped", "attempts", attempt+1,
+			log.Error(errDelivery, "Notification delivery stopped", "attempts", attempt+1,
 				"statusCode", result.status, "reason", result.reason)
 			if result.retry {
 				return stateExhausted
@@ -183,7 +195,7 @@ func (d *dispatcher) deliver(ctx context.Context, e Event) string {
 			return stateRejected
 		}
 		delay := retryDelay(attempt)
-		log.Info("Retrying webhook", "attempt", attempt+1, "statusCode", result.status,
+		log.Info("Retrying notification", "attempt", attempt+1, "statusCode", result.status,
 			"reason", result.reason, "retryAfter", delay)
 		if !d.wait(ctx, delay) {
 			return ""

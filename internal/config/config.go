@@ -3,7 +3,10 @@ package config
 import (
 	"flag"
 	"fmt"
+	"net"
+	"net/mail"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +36,18 @@ type Config struct {
 	WebhookURL        string        `mapstructure:"webhook-url"`
 	WebhookTimeout    time.Duration `mapstructure:"webhook-timeout"`
 	WebhookMaxRetries int           `mapstructure:"webhook-max-retries"`
+
+	SMTPEnabled         bool          `mapstructure:"smtp-enabled"`
+	SMTPAddress         string        `mapstructure:"smtp-address"`
+	SMTPTLS             string        `mapstructure:"smtp-tls"`
+	SMTPUsername        string        `mapstructure:"smtp-username"`
+	SMTPPassword        string        `mapstructure:"smtp-password"`
+	SMTPFrom            string        `mapstructure:"smtp-from"`
+	SMTPTo              []string      `mapstructure:"smtp-to"`
+	SMTPTimeout         time.Duration `mapstructure:"smtp-timeout"`
+	SMTPMaxRetries      int           `mapstructure:"smtp-max-retries"`
+	SMTPSubjectTemplate string        `mapstructure:"smtp-subject-template"`
+	SMTPBodyTemplate    string        `mapstructure:"smtp-body-template"`
 
 	DatabaseHost     string `mapstructure:"database-host"`
 	DatabasePort     int    `mapstructure:"database-port"`
@@ -72,6 +87,18 @@ func LoadConfig(configFile string, flags *flag.FlagSet) (*Config, error) {
 	v.SetDefault("webhook-timeout", "5s")
 	v.SetDefault("webhook-max-retries", 3)
 
+	v.SetDefault("smtp-enabled", false)
+	v.SetDefault("smtp-address", "")
+	v.SetDefault("smtp-tls", "starttls")
+	v.SetDefault("smtp-username", "")
+	v.SetDefault("smtp-password", "")
+	v.SetDefault("smtp-from", "")
+	v.SetDefault("smtp-to", []string{})
+	v.SetDefault("smtp-timeout", "10s")
+	v.SetDefault("smtp-max-retries", 3)
+	v.SetDefault("smtp-subject-template", "")
+	v.SetDefault("smtp-body-template", "")
+
 	v.SetDefault("database-host", "localhost")
 	v.SetDefault("database-port", 5432)
 	v.SetDefault("database-user", "kubetask")
@@ -107,9 +134,11 @@ func LoadConfig(configFile string, flags *flag.FlagSet) (*Config, error) {
 		})
 	}
 
-	if _, ok := v.Get("webhook-url").(string); !ok {
-		// Do not let mapstructure include a secret-bearing value in its error.
-		return nil, fmt.Errorf("webhook-url must be a string")
+	for _, key := range []string{"webhook-url", "smtp-username", "smtp-password"} {
+		if _, ok := v.Get(key).(string); !ok {
+			// Do not let mapstructure include a secret-bearing value in its error.
+			return nil, fmt.Errorf("%s must be a string", key)
+		}
 	}
 	cfg := &Config{}
 	if err := v.Unmarshal(cfg); err != nil {
@@ -129,9 +158,65 @@ func LoadConfig(configFile string, flags *flag.FlagSet) (*Config, error) {
 	if err := cfg.validateWebhook(); err != nil {
 		return nil, err
 	}
+	if err := cfg.validateSMTP(); err != nil {
+		return nil, err
+	}
 
 	cfg.ConfigFile = v.ConfigFileUsed()
 	return cfg, nil
+}
+
+func (c *Config) validateSMTP() error {
+	if !c.SMTPEnabled {
+		return nil
+	}
+	c.SMTPAddress = strings.TrimSpace(c.SMTPAddress)
+	host, portText, err := net.SplitHostPort(c.SMTPAddress)
+	port, portErr := strconv.Atoi(portText)
+	if err != nil || portErr != nil || host == "" || strings.ContainsAny(host, "/\\@ \t\r\n") || port < 1 || port > 65535 {
+		return fmt.Errorf("smtp-address must contain a host and a port between 1 and 65535")
+	}
+	if c.SMTPTLS != "starttls" && c.SMTPTLS != "implicit" {
+		return fmt.Errorf("smtp-tls must be starttls or implicit")
+	}
+	if (c.SMTPUsername == "") != (c.SMTPPassword == "") || strings.ContainsAny(c.SMTPUsername+c.SMTPPassword, "\x00\r\n") {
+		return fmt.Errorf("smtp-username and smtp-password must both be set or both be empty, without NUL or line breaks")
+	}
+	c.SMTPFrom = strings.TrimSpace(c.SMTPFrom)
+	if !validSMTPAddress(c.SMTPFrom) {
+		return fmt.Errorf("smtp-from must be a bare ASCII email address")
+	}
+	if len(c.SMTPTo) == 0 {
+		return fmt.Errorf("smtp-to must contain at least one email address")
+	}
+	seen := make(map[string]bool)
+	recipients := make([]string, 0, len(c.SMTPTo))
+	for _, recipient := range c.SMTPTo {
+		recipient = strings.TrimSpace(recipient)
+		if !validSMTPAddress(recipient) {
+			return fmt.Errorf("smtp-to must contain bare ASCII email addresses")
+		}
+		if !seen[recipient] {
+			seen[recipient] = true
+			recipients = append(recipients, recipient)
+		}
+	}
+	c.SMTPTo = recipients
+	if c.SMTPTimeout < time.Second || c.SMTPTimeout > time.Minute {
+		return fmt.Errorf("smtp-timeout must be between 1s and 60s")
+	}
+	if c.SMTPMaxRetries < 0 || c.SMTPMaxRetries > 5 {
+		return fmt.Errorf("smtp-max-retries must be between 0 and 5")
+	}
+	return nil
+}
+
+func validSMTPAddress(value string) bool {
+	address, err := mail.ParseAddress(value)
+	if err != nil || address.Name != "" || address.Address != value {
+		return false
+	}
+	return strings.IndexFunc(value, func(r rune) bool { return r <= ' ' || r >= 127 }) == -1
 }
 
 func (c *Config) validateWebhook() error {

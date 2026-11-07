@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	eventsv1 "k8s.io/api/events/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,7 +41,7 @@ func testTenantBoundary(
 		Rules: []rbacv1.PolicyRule{{
 			APIGroups: []string{kubetaskv1.GroupVersion.Group},
 			Resources: []string{testTaskResource, "workflows"},
-			Verbs:     []string{"get", testListVerb, "create", "update", "delete"},
+			Verbs:     []string{testGetVerb, testListVerb, "create", "update", "delete"},
 		}},
 	}
 	if _, err := admin.RbacV1().Roles(namespace).Create(ctx, role, metav1.CreateOptions{}); err != nil {
@@ -87,7 +89,6 @@ func testTenantBoundary(
 		router.engine.ServeHTTP(w, req)
 		return w
 	}
-	const tasksPath = "/api/v1/tasks"
 	if err := wait.PollUntilContextTimeout(ctx, 50*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
 		return request(ctx, http.MethodGet, tasksPath, "").Code == http.StatusOK, nil
 	}); err != nil {
@@ -109,8 +110,8 @@ func testTenantBoundary(
 	}{
 		{http.MethodPost, tasksPath, body, ownerLabel, http.StatusCreated},
 		{http.MethodPut, tasksPath + "/" + ownName, body, ownerLabel, http.StatusOK},
-		{http.MethodGet, tasksPath, "", `"total":1`, http.StatusOK},
-		{http.MethodGet, "/api/v1/stats", "", `"total":1`, http.StatusOK},
+		{http.MethodGet, tasksPath, "", testSingleTotal, http.StatusOK},
+		{http.MethodGet, statsPath, "", testSingleTotal, http.StatusOK},
 		{http.MethodDelete, tasksPath + "/" + foreignTask.Name, "", "", http.StatusNotFound},
 		{http.MethodGet, tasksPath + "/" + foreignTask.Name + "/logs", "", "", http.StatusNotFound},
 		{http.MethodGet, "/api/v1/workflows/" + foreignWorkflow.Name, "", "", http.StatusNotFound},
@@ -161,14 +162,19 @@ func testTenantBoundary(
 	}
 	want := map[string]string{"Create": "APIRequestSucceeded", "Trigger": "APIRequestDenied"}
 	for _, event := range events.Items {
-		if want[event.Action] != event.Reason || event.Related == nil || event.Related.Name != created.Name ||
-			event.Regarding.Name != account || event.Regarding.Namespace != namespace || event.Regarding.UID != accountObject.UID ||
-			event.Annotations[auth.APIKeyIDExtra] != "ci" || strings.Contains(event.Note, key) {
-			t.Errorf("audit Event for %s did not identify the expected actor, target or outcome", event.Action)
-		}
-		if event.Action == "Create" && event.Related != nil && event.Related.UID != created.UID {
-			t.Error("create audit Event must contain the API-server-assigned target UID")
-		}
+		assertTenantAuditEvent(t, event, &created, accountObject, key, want[event.Action])
 		delete(want, event.Action)
+	}
+}
+
+func assertTenantAuditEvent(t *testing.T, event eventsv1.Event, task *kubetaskv1.Task, account *corev1.ServiceAccount, key, reason string) {
+	t.Helper()
+	if event.Reason != reason || event.Related == nil || event.Related.Name != task.Name ||
+		event.Regarding.Name != account.Name || event.Regarding.Namespace != account.Namespace || event.Regarding.UID != account.UID ||
+		event.Annotations[auth.APIKeyIDExtra] != "ci" || strings.Contains(event.Note, key) {
+		t.Errorf("audit Event for %s did not identify the expected actor, target or outcome", event.Action)
+	}
+	if event.Action == "Create" && event.Related != nil && event.Related.UID != task.UID {
+		t.Error("create audit Event must contain the API-server-assigned target UID")
 	}
 }

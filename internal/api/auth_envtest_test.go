@@ -32,8 +32,12 @@ import (
 )
 
 const (
+	tasksPath        = "/api/v1/tasks"
+	statsPath        = "/api/v1/stats"
+	testGetVerb      = "get"
 	testTaskResource = "tasks"
 	testListVerb     = "list"
+	testSingleTotal  = `"total":1`
 )
 
 // TestServiceAccountTokenAuthentication uses locally issued, signed ServiceAccount
@@ -129,7 +133,7 @@ func TestServiceAccountTokenAuthentication(t *testing.T) {
 					t.Error("real TokenReview did not deliver the expected ServiceAccount identity")
 				}
 			})
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks", nil).WithContext(ctx)
+			req := httptest.NewRequest(http.MethodGet, tasksPath, nil).WithContext(ctx)
 			if tt.token != "" {
 				req.Header.Set("Authorization", "Bearer "+tt.token)
 			}
@@ -229,13 +233,13 @@ func testBusinessRBACBoundary(
 		engine.engine.ServeHTTP(w, req)
 		return w.Code
 	}
-	if status := request(router, http.MethodGet, "/api/v1/tasks"); status != http.StatusForbidden {
+	if status := request(router, http.MethodGet, tasksPath); status != http.StatusForbidden {
 		t.Fatalf("caller without a role: status %d, want 403", status)
 	}
 	const roleName = "kubetask-api-readonly"
 	if _, err := admin.RbacV1().ClusterRoles().Create(ctx, &rbacv1.ClusterRole{
 		Name:  roleName,
-		Rules: []rbacv1.PolicyRule{{APIGroups: []string{kubetaskv1.SchemeGroupVersion.Group}, Resources: []string{testTaskResource, "workflows"}, Verbs: []string{"get", testListVerb}}},
+		Rules: []rbacv1.PolicyRule{{APIGroups: []string{kubetaskv1.SchemeGroupVersion.Group}, Resources: []string{testTaskResource, "workflows"}, Verbs: []string{testGetVerb, testListVerb}}},
 	}, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -256,10 +260,10 @@ func testBusinessRBACBoundary(
 		method, path string
 		status       int
 	}{
-		{http.MethodGet, "/api/v1/tasks", http.StatusOK},
-		{http.MethodGet, "/api/v1/stats", http.StatusOK},
+		{http.MethodGet, tasksPath, http.StatusOK},
+		{http.MethodGet, statsPath, http.StatusOK},
 		{http.MethodGet, "/api/v1/workflows", http.StatusOK},
-		{http.MethodPost, "/api/v1/tasks", http.StatusForbidden},
+		{http.MethodPost, tasksPath, http.StatusForbidden},
 		{http.MethodDelete, "/api/v1/tasks/example", http.StatusForbidden},
 		{http.MethodPost, "/api/v1/tasks/example/trigger", http.StatusForbidden},
 	} {
@@ -276,7 +280,7 @@ func testBusinessRBACBoundary(
 		t.Fatal(err)
 	}
 	limitedRouter := NewRouter(k8sClient, admin, "", middleware.Authentication(a), middleware.Authorization(limitedAuthorizer))
-	if status := request(limitedRouter, http.MethodGet, "/api/v1/tasks"); status != http.StatusServiceUnavailable {
+	if status := request(limitedRouter, http.MethodGet, tasksPath); status != http.StatusServiceUnavailable {
 		t.Errorf("reviewer without SubjectAccessReview permission: status %d, want 503", status)
 	}
 }
@@ -296,7 +300,7 @@ func testNaturalTokenExpiration(
 	}
 	router := NewRouter(k8sClient, admin, "", middleware.Authentication(a))
 	request := func() int {
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks", nil).WithContext(slowCtx)
+		req := httptest.NewRequest(http.MethodGet, tasksPath, nil).WithContext(slowCtx)
 		req.Header.Set("Authorization", "Bearer "+issued.Status.Token)
 		w := httptest.NewRecorder()
 		router.engine.ServeHTTP(w, req)

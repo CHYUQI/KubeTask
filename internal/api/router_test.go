@@ -24,6 +24,8 @@ import (
 )
 
 const (
+	testAuthTaskName      = "auth-task"
+	testAuthTaskJSON      = `"name":"` + testAuthTaskName + `"`
 	testBearerSecretToken = "Bearer secret-token"
 )
 
@@ -78,7 +80,7 @@ func TestTriggerChecksStatusPermissionBeforeMutation(t *testing.T) {
 	checks := 0
 	z := routerAuthorizerFunc(func(_ context.Context, _ *authenticationv1.UserInfo, attributes authorizationv1.ResourceAttributes) error {
 		checks++
-		if attributes.Name != "auth-task" {
+		if attributes.Name != testAuthTaskName {
 			t.Error("authorization lost the target resource name")
 		}
 		if attributes.Subresource == "status" {
@@ -87,12 +89,12 @@ func TestTriggerChecksStatusPermissionBeforeMutation(t *testing.T) {
 		return nil
 	})
 	router := NewRouter(k8sClient, nil, "", middleware.Authentication(a), middleware.Authorization(z))
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/auth-task/trigger", nil)
+	req := httptest.NewRequest(http.MethodPost, tasksPath+"/"+testAuthTaskName+"/trigger", nil)
 	req.Header.Set("Authorization", testBearerSecretToken)
 	w := httptest.NewRecorder()
 	router.engine.ServeHTTP(w, req)
 	task := &kubetaskv1.Task{}
-	if err := k8sClient.Get(context.Background(), client.ObjectKey{Name: "auth-task"}, task); err != nil {
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Name: testAuthTaskName}, task); err != nil {
 		t.Fatal(err)
 	}
 	if checks != 3 || w.Code != http.StatusForbidden || task.Annotations["kubetask.io/last-trigger"] != "" {
@@ -173,14 +175,14 @@ func TestRouterAuthenticationAllowsRealHandlers(t *testing.T) {
 		status int
 		body   string
 	}{
-		{path: "/api/v1/tasks", status: http.StatusOK, body: `"name":"auth-task"`},
-		{path: "/api/v1/tasks/auth-task", status: http.StatusOK, body: `"name":"auth-task"`},
+		{path: tasksPath, status: http.StatusOK, body: testAuthTaskJSON},
+		{path: tasksPath + "/" + testAuthTaskName, status: http.StatusOK, body: testAuthTaskJSON},
 		{path: "/api/v1/workflows", status: http.StatusOK, body: `"name":"auth-workflow"`},
 		{path: "/api/v1/workflows/auth-workflow", status: http.StatusOK, body: `"workflow":`},
-		{path: "/api/v1/stats", status: http.StatusOK, body: `"total":1`},
+		{path: statsPath, status: http.StatusOK, body: testSingleTotal},
 		{path: "/api/v1/stats/trend", status: http.StatusOK, body: `[]`},
 		// 无关联 Job 时由真实日志 handler 返回此错误，确认该路由也能通过认证。
-		{path: "/api/v1/tasks/auth-task/logs?follow=true", status: http.StatusNotFound, body: `"error":"no jobs found for task"`},
+		{path: tasksPath + "/" + testAuthTaskName + "/logs?follow=true", status: http.StatusNotFound, body: `"error":"no jobs found for task"`},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
 			type requestKey struct{}
@@ -255,8 +257,8 @@ func TestRouterWithoutMiddlewareRetainsAnonymousAccess(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := NewRouter(routerFixtureClient(t), nil, "")
 	w := httptest.NewRecorder()
-	router.engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/tasks", nil))
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"name":"auth-task"`) {
+	router.engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, tasksPath, nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), testAuthTaskJSON) {
 		t.Errorf("router without middleware: status %d, want anonymous 200 response", w.Code)
 	}
 }
@@ -272,7 +274,7 @@ func routerFixtureClient(t *testing.T) client.Client {
 	}
 	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(
 		&kubetaskv1.Task{
-			Name: "auth-task",
+			Name: testAuthTaskName,
 			Spec: kubetaskv1.TaskSpec{Type: kubetaskv1.TaskTypeOneTime, Image: "busybox"},
 		},
 		&kubetaskv1.Workflow{Name: "auth-workflow"},

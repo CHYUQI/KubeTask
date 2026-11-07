@@ -10,7 +10,7 @@ import (
 )
 
 func TestObserverOnlyAcceptsNewFailures(t *testing.T) {
-	d := newDispatcher(nil, Options{Timeout: time.Second}, logr.Discard())
+	d := newDispatcher(nil, newWebhook(Options{Timeout: time.Second}), 0, logr.Discard())
 	o := &observer{dispatcher: d}
 	if !o.NeedLeaderElection() {
 		t.Fatal("notification pipeline must be leader scoped")

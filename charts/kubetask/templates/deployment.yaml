@@ -45,6 +45,18 @@ spec:
                 name: {{ required "webhook.existingSecret.name is required when webhook.enabled is true" .Values.webhook.existingSecret.name | quote }}
                 key: {{ required "webhook.existingSecret.key is required when webhook.enabled is true" .Values.webhook.existingSecret.key | quote }}
           {{- end }}
+          {{- if and .Values.smtp.enabled .Values.smtp.existingSecret.name }}
+          - name: KUBETASK_SMTP_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.smtp.existingSecret.name | quote }}
+                key: {{ required "smtp.existingSecret.usernameKey is required" .Values.smtp.existingSecret.usernameKey | quote }}
+          - name: KUBETASK_SMTP_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.smtp.existingSecret.name | quote }}
+                key: {{ required "smtp.existingSecret.passwordKey is required" .Values.smtp.existingSecret.passwordKey | quote }}
+          {{- end }}
         volumeMounts:
           - name: config
             mountPath: /etc/kubetask

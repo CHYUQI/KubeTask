@@ -22,7 +22,7 @@ func TestAPIKeyBindingLifecycle(t *testing.T) {
 	const token, keyID = "ktk_test-key", "build-ci"
 	ctx := t.Context()
 	account := &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a", Name: "ci", UID: "bound-uid"},
+		Namespace: "team-a", Name: "ci", UID: "bound-uid",
 	}
 	accounts := fake.NewClientset(account).CoreV1()
 	path := filepath.Join(t.TempDir(), "keys.json")
@@ -40,7 +40,7 @@ func TestAPIKeyBindingLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	if user.Username != testServiceAccount || user.UID != string(account.UID) ||
-		!slices.Equal(user.Groups, []string{"system:serviceaccounts", "system:serviceaccounts:team-a", "system:authenticated"}) ||
+		!slices.Equal(user.Groups, []string{testServiceAccountsGroup, testTeamAGroup, testAuthenticatedGroup}) ||
 		!slices.Equal(user.Extra[auth.APIKeyIDExtra], []string{keyID}) {
 		t.Fatalf("unexpected API key identity: %#v", user)
 	}

@@ -8,7 +8,7 @@ KubeTask describes tasks and workflows with custom resources (CRDs): a `Task` is
 
 > Positioning: lightweight, extensible, and easy to deploy — suitable for small/medium teams, edge computing (k3s), and cloud-native learning.
 
-Working-tree status (2026-11-05): Workflow orchestration/UI, Helm auth configuration, RBAC, optional namespace tenant isolation, CI/CD API keys, Events auditing, and the global webhook MVP are implemented. Full P2.2/P2.3 deployment acceptance is pending. See [project status](docs/PROJECT_STATUS.md) for local checks and differences from the remote-tracking branch.
+Working-tree status (2026-11-07): Workflow orchestration/UI, Helm auth configuration, RBAC, optional namespace tenant isolation, CI/CD API keys, Events auditing, global webhooks, and SMTP email alerts are implemented. Full P2.2/P2.3 deployment acceptance is pending. Resource-aware scheduling has moved to v0.3.0. See [project status](docs/PROJECT_STATUS.md) for verification details.
 
 ## Features
 
@@ -38,7 +38,7 @@ Working-tree status (2026-11-05): Workflow orchestration/UI, Helm auth configura
 - **Web UI (bundled with the image)**: Vue 3 + Vite + native SVG charts with dashboard, task management, live logs, and workflow list/detail pages; Dagre lays out DAGs with status colors, zoom, node inspection, and child Task/log links; the Dockerfile builds the frontend automatically, so no separate deployment is needed
 - **SSE streaming logs**: reads Job Pod logs in real time through the Kubernetes API with `tail`, `sinceSeconds`, and `follow` support
 - **Configuration**: environment variables > YAML > defaults (Viper, `KUBETASK_` prefix); explicit authentication flags override environment variables
-- **Global webhook**: optional JSON notifications for Task execution failures/timeouts, with Workflow child context, an asynchronous queue, deduplication and bounded retries; best-effort delivery
+- **Global notifications**: Task execution failures and timeouts can trigger webhooks or SMTP email alerts with Workflow child context. Each channel has an independent queue, deduplication and bounded retries for best-effort delivery.
 - **Optional authentication and authorization**: ServiceAccount TokenReview and SubjectAccessReview RBAC; in-memory UI Token settings support HTTP and fetch SSE, with caller permissions checked before business operations
 - **Structured logging**: Zap with console / JSON formats
 - **Observability**: controller-runtime metrics, `/healthz` health check, `/readyz` readiness check
@@ -416,6 +416,32 @@ helm upgrade --install kubetask ./charts/kubetask --namespace default \
 
 The default Secret key is `url`; override it with `webhook.existingSecret.key`. The chart does not create the Secret. Restart Pods after configuration changes and use a newly built image containing this implementation; the chart's default image tag remains `v0.1.0`.
 
+To relay alerts to a WeCom group robot, provide its webhook URL in the `WECOM_WEBHOOK_URL` environment variable and run `python deploy/wecom_relay.py`. On the same host, set KubeTask's `webhook-url` to `http://127.0.0.1:8090/hooks/kubetask`. For a cluster deployment, bind the [relay](deploy/wecom_relay.py) to a trusted internal interface with `--host` and configure a URL reachable from the KubeTask Pod.
+
+The relay uses the Python 3 standard library. It acknowledges delivery when WeCom returns `errcode: 0`, delegates retries for rate limits and temporary transport failures to KubeTask, and returns `422` when WeCom rejects a message.
+
+### Email alerts
+
+SMTP and webhook delivery have independent switches, queues, deduplication and retries. Email uses the same terminal Job failure and timeout events. Default messages include Task, Namespace, Job, reason, event ID and optional Workflow context.
+
+Enable `smtp-enabled`, configure `smtp-address` as `host:port`, and provide `smtp-from` and `smtp-to`. The YAML recipient list is an array; `KUBETASK_SMTP_TO` accepts comma-separated addresses. Sender and recipients are bare ASCII email addresses. `smtp-tls` defaults to `starttls` (commonly port 587); `implicit` supports direct TLS connections (commonly port 465). Both verify the server certificate. Set `smtp-username` and `smtp-password` together for AUTH PLAIN, or leave both empty for an SMTP relay. All keys accept the corresponding `KUBETASK_SMTP_*` environment variable.
+
+```yaml
+smtp:
+  enabled: true
+  address: smtp.example.com:587
+  tls: starttls
+  from: alerts@example.com
+  to:
+    - ops@example.com
+  existingSecret:
+    name: kubetask-smtp
+```
+
+The existing Secret contains `username` and `password`. `smtp.timeout` defaults to `10s` (1–60 seconds); `smtp.maxRetries` defaults to `3` (0–5 additional attempts). YAML uses `smtp-timeout` and `smtp-max-retries`. SMTP 4xx responses and connection failures before completing DATA can be retried; 5xx rejections stop delivery. The body is submitted after all recipients are accepted. A missing acknowledgement after DATA stops resending and logs `smtp_ack_unknown`. Retries keep a stable Message-ID. Success means the SMTP server accepted the message for delivery.
+
+Optional `smtp-subject-template` and `smtp-body-template` use Go `text/template` with the webhook Event fields, such as `.Type`, `.Task.Name`, `.Execution.Namespace`, `.Execution.JobName`, `.Execution.Reason` and `.ID`. Guard optional Workflow context with `{{if .Workflow}}...{{end}}`. Invalid syntax fails startup; execution errors and multiline subjects stop that email. Helm uses `smtp.subjectTemplate` and `smtp.bodyTemplate`. Restart Pods after changes. Delivery retains the webhook's best-effort queue and restart boundaries.
+
 ## Project Structure
 
 ```
@@ -431,7 +457,7 @@ kubetask/
 │   ├── logger/                     # Zap structured logging
 │   ├── auth/                       # TokenReview, API keys, and SubjectAccessReview
 │   ├── tenant/                     # Tenant labels, request scope, and Job lookup
-│   ├── notification/               # Job failure observation and global webhook delivery
+│   ├── notification/               # Job failure observation and webhook / SMTP delivery
 │   ├── naming/                     # Shared Task name length limit
 │   ├── controller/                 # Task / Workflow Reconciler + envtest suites
 │   ├── workflow/                   # DAG validation / topological order / levels (pure logic + unit tests)
@@ -497,7 +523,7 @@ go test ./... -count=1
 | Version | Content | Status |
 |---------|---------|--------|
 | **v0.1.0** | MVP: Task CRD + Controller + REST API + Web UI (same-port bundle) + Helm/k3s deployment sources | ✅ Core implemented |
-| **v0.2.0** | Workflows, auth/multi-tenancy, alerts, scheduling enhancements | 🚧 Partially complete |
+| **v0.2.0** | Workflows, auth/multi-tenancy, and notifications | 🚧 Partially complete |
 | ↳ | Workflow CRD types, CEL validation, CRD / RBAC / sample generation | ✅ Done |
 | ↳ | `internal/workflow` DAG validation, topology, and child Task naming | ✅ Done |
 | ↳ | Workflow Reconciler: child Task orchestration, status write-back, failure propagation, `maxParallel` throttling, deletion cleanup | ✅ Done |
@@ -505,8 +531,8 @@ go test ./... -count=1
 | ↳ | ServiceAccount authentication and Web UI Token / SSE support | ✅ Implemented; disabled by default |
 | ↳ | RBAC resource authorization | ✅ Integrated with business APIs; local envtest verified |
 | ↳ | Helm auth, namespace isolation, API keys, Events auditing | ✅ Implemented; see [configuration](docs/API.md#11-认证配置与路由接入) |
-| ↳ | Webhook/DingTalk/WeCom alerts and resource-aware scheduling | 📋 Planned |
-| **v0.3.0** | Multi-cluster management (k3s + ACK cloud-edge), smart off-peak scheduling, Prometheus + Grafana observability | 📋 Planned |
+| ↳ | SMTP email, email templates, global webhooks, and a WeCom relay | 🚧 Deployment acceptance pending |
+| **v0.3.0** | Multi-cluster management (k3s + ACK cloud-edge), resource-aware and off-peak scheduling, Prometheus + Grafana observability | 📋 Planned |
 
 See [PROJECT_PLAN.md](PROJECT_PLAN.md) for the detailed design.
 

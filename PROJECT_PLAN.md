@@ -2,7 +2,7 @@
 
 ## 项目计划书与实现进度
 
-最后核对：2026-11-05。MVP 与 P2.0/P2.1 已实现；P2.2 已实现认证、授权、Namespace 租户隔离、CI/CD API Key 和 Events 审计；P2.3 全局通用 Webhook MVP 已实现。P2.2/P2.3 真实部署仍待验收。当前 Chart/image 默认标签仍为 v0.1.0；历史节点保留当时的验收范围，最新结果见 [项目状态](docs/PROJECT_STATUS.md)。
+最后核对：2026-11-07。MVP 与 P2.0/P2.1 已实现；P2.2 已实现认证、授权、Namespace 租户隔离、CI/CD API Key 和 Events 审计；P2.3 已实现通用 Webhook、SMTP 邮件和邮件模板，另有独立企微转发脚本。P2.2/P2.3 真实部署仍待验收。负载感知调度已移至 v0.3.0。当前 Chart/image 默认标签仍为 v0.1.0；历史节点保留当时的验收范围，最新结果见 [项目状态](docs/PROJECT_STATUS.md)。
 
 ---
 
@@ -33,7 +33,7 @@ KISS 原则 → 先做精，再做全
 | 问题 | 传统方案 | KubeTask 方案 |
 |------|----------|--------------|
 | 定时任务无统一视图 | Shell crontab / Jenkins 分散管理 | Web 管理后台 + 统一 Task CRD |
-| 任务失败无告警 | 靠人盯着 | Job 重试与全局 Webhook MVP 已实现；钉钉等渠道规划中 |
+| 任务失败无告警 | 靠人盯着 | Job 重试、全局 Webhook、SMTP 邮件和企微转发脚本已实现 |
 | 任务依赖无法编排 | 手写脚本链式调用 | DAG 工作流（YAML 定义） |
 | 集群资源浪费 | 固定调度 | 资源水位感知 + 错峰调度（规划） |
 | 边缘+云端割裂 | 分别管理 | 多集群统一管理（规划） |
@@ -239,11 +239,14 @@ spec:
 
 #### P2.3 告警通知（1 周）
 - [x] **全局 Webhook MVP**：任务执行失败/超时 → 固定 JSON Payload，异步尽力投递（真实集群验收待完成）
-- [ ] **内置通知渠道**
-  - 钉钉机器人
-  - 企业微信机器人
-  - Slack Webhook
-- [ ] **通知模板**：可自定义消息格式
+- [x] **SMTP 邮件**：STARTTLS / 隐式 TLS、可选 AUTH PLAIN、多收件人；通过已有 Secret 注入账号和密码
+- [x] **邮件模板**：自定义主题和纯文本正文，复用任务事件字段
+- [x] **企微转发脚本**：独立接收通用 Webhook 并转换为群机器人文本
+- [ ] **部署验收**：使用真实失败 / 超时 Job，核对收件箱、Webhook 和企微群结果
+
+2026-11-07 调整。v0.2.0 优先交付邮件和通用 Webhook。钉钉退出当前范围，其他内置机器人渠道后续按需推进。每个启用的渠道拥有独立队列、去重和重试状态，采用同一套 Job 失败 / 超时观察规则。
+
+SMTP 每次请求超时默认 10 秒，可配置 1–60 秒；额外重试默认 3 次，可配置 0–5 次。SMTP 4xx 暂时拒绝和提交 DATA 完成前的连接故障可重试，5xx 永久拒绝终止。收件人全部被接受后才提交正文。DATA 提交后的确认回执丢失时停止重发，并记录 `smtp_ack_unknown`。重试使用稳定 Message-ID，成功以 SMTP 服务器接受邮件为准。配置、Helm 及模板示例见 README 的邮件告警一节。
 
 ##### 全局通用 Webhook MVP（2026-10-26 定案）
 
@@ -325,8 +328,8 @@ Helm 增加 `webhook.enabled / timeout / maxRetries / existingSecret.name / exis
 5. 使用非零 backoffLimit 观察 Pod 重试阶段不发告警；对已失败 Job 更新 metadata 不重复发送；重启 KubeTask 不补发已有失败。另创建包含失败节点的 Workflow，检查子任务上下文，不应产生整体汇总消息。
 6. 接收端依次返回 503/204、401、307，核对重试与停止行为；保持失败响应检查总尝试次数，确认通知故障不阻塞新 Task 执行。短 TTL 在观察前清理掉的执行结果不能由本 MVP 恢复。
 
-#### P2.4 调度增强（1 周）
-- [ ] **资源感知调度**：根据集群节点 CPU/Mem 负载选择执行节点
+#### P2.4 已有执行控制
+资源感知调度于 2026-11-07 移至 v0.3.0 的 P3.2。
 - [x] **任务超时控制**：`ActiveDeadlineSeconds` 已传给 Job
 - [x] **Cron 并发策略**：`Allow` / `Forbid` / `Replace`
 
@@ -347,7 +350,8 @@ Helm 增加 `webhook.enabled / timeout / maxRetries / existingSecret.name / exis
 - [ ] **多集群调度**：Task 指定 `clusterName` 或在集群间调度
 - [ ] **云边协同**：边缘（k3s）+ 云端（ACK）统一管理
 
-#### P3.2 智能错峰调度（1 周）
+#### P3.2 负载感知与智能错峰调度（原估算 1 周，范围调整后待重估）
+- [ ] **资源感知调度**：根据节点实际 CPU/Mem 负载选择执行节点；由原 P2.4 移入
 - [ ] **历史数据采集**：记录每次执行时长、资源消耗、时间段
 - [ ] **负载预测**：基于 P50/P90 统计 + 简单指数平滑预测高峰期
 - [ ] **错峰策略**：
@@ -501,14 +505,14 @@ Manager 在默认 `:8081` 提供 `/healthz`、`/readyz`；业务端口 `:8080` �
 | 7 | 前后端一体化打包 + Workflow CRD + Controller | 单镜像部署、DAG 解析 + 拓扑排序 + 任务编排 |
 | 8 | Workflow 前端视图 | DAG 图形化显示 + 状态展示 |
 | 9 | 多租户 + RBAC + 认证 | Namespace 隔离、API Key |
-| 10 | 告警通知 + 调度增强 | Webhook/钉钉/企微通知、资源感知调度 |
+| 10 | 告警通知 | SMTP 邮件、邮件模板、通用 Webhook 与企微转发 |
 
 ### Phase 3：创新特性（4 周）
 
 | 周 | 任务 | 交付物 |
 |----|------|--------|
 | 11 | 多集群管理 | Cluster CRD + 跨集群调度 |
-| 12 | 智能错峰调度 | 历史采集 + P50/P90 统计 + 自动偏移 |
+| 12 | 负载感知与智能错峰调度 | 节点资源感知、历史采集、P50/P90 统计与自动偏移，新增范围需重估 |
 | 13 | 可观测性 | Prometheus Metrics + Grafana 模板 |
 | 14 | 文档 + 演示 | API 文档、部署手册、演示视频 |
 
@@ -519,7 +523,7 @@ Manager 在默认 `:8081` 提供 `/healthz`、`/readyz`；业务端口 `:8080` �
 ### 已有交付物
 - [x] Task / Workflow Go 类型、生成 CRD / RBAC / DeepCopy、两个 Reconciler
 - [x] Gin API、可选 Bearer 认证与 RBAC、租户范围、Events 审计、SSE 与静态托管
-- [x] 全局通用 Webhook MVP、配置与 Helm Secret 接入（尽力投递，真实集群待验收）
+- [x] 全局 Webhook、SMTP 邮件与模板、独立企微转发脚本及 Helm Secret 接入（尽力投递，真实部署待验收）
 - [x] Vue 3 源码、内存 Token 接入、DAG 与认证测试
 - [x] Dockerfile、Helm Chart、k3s 脚本（源码交付与部署验收分别记录）
 - [x] Windows minikube 工作流集成脚本
@@ -626,4 +630,4 @@ kubectl apply -f config/samples/kubetask_v1_task.yaml
 
 ---
 
-> **进度**：v0.2.0 规划进行中，P2.2 与 P2.3 Webhook MVP 已实现，真实部署待验收 | **最后核对**：2026-11-05
+> **进度**：v0.2.0 实现认证、多租户、Webhook、SMTP 邮件与模板，真实部署待验收；资源感知调度移至 v0.3.0 | **最后核对**：2026-11-07

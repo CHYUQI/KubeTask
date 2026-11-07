@@ -19,8 +19,21 @@ type observer struct {
 // SetupWithManager registers the outbound notification pipeline. Call only when
 // enabled. Both observation and sending start after this manager becomes leader.
 func SetupWithManager(mgr ctrl.Manager, opts Options) error {
-	log := ctrl.Log.WithName("notification")
-	d := newDispatcher(mgr.GetCache(), opts, log)
+	return setupWithManager(mgr, "webhook", newWebhook(opts), opts.MaxRetries)
+}
+
+// SetupSMTPWithManager registers an independent queue for email alerts.
+func SetupSMTPWithManager(mgr ctrl.Manager, opts SMTPOptions) error {
+	sender, err := newSMTPSender(opts)
+	if err != nil {
+		return err
+	}
+	return setupWithManager(mgr, "smtp", sender, opts.MaxRetries)
+}
+
+func setupWithManager(mgr ctrl.Manager, channel string, transport sender, maxRetries int) error {
+	log := ctrl.Log.WithName("notification").WithValues("channel", channel)
+	d := newDispatcher(mgr.GetCache(), transport, maxRetries, log)
 	return mgr.Add(&observer{cache: mgr.GetCache(), dispatcher: d})
 }
 
@@ -40,8 +53,8 @@ func (o *observer) Start(ctx context.Context) error {
 			o.dispatcher.log.Error(err, "Failed to remove notification handler")
 		}
 	}()
-	o.dispatcher.log.Info("Webhook dispatcher started", "timeout", o.dispatcher.webhook.client.Timeout,
-		"maxRetries", o.dispatcher.maxRetries, "queueCapacity", queueCapacity, "workers", workerCount)
+	o.dispatcher.log.Info("Notification dispatcher started", "maxRetries", o.dispatcher.maxRetries,
+		"queueCapacity", queueCapacity, "workers", workerCount)
 	o.dispatcher.run(ctx)
 	return nil
 }

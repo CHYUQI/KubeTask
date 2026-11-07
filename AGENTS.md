@@ -1,6 +1,6 @@
 # kubetask - AI Agent Guide
 
-最后核对：2026-11-05。项目状态与验证边界见 [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)。
+最后核对：2026-11-07。项目状态与验证边界见 [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)。
 
 ## Actual Project Structure
 
@@ -17,7 +17,7 @@ kubetask/
 │   ├── logger/logger.go                ← Zap Logger (AtomicLevel 动态改级别)
 │   ├── auth/                           ← ServiceAccount Token/API Key 认证 + SubjectAccessReview
 │   ├── tenant/                         ← 租户标签、请求范围与 Job 定位
-│   ├── notification/                  ← 独立 Job 观察、内存队列、全局 Webhook 与测试
+│   ├── notification/                  ← 独立 Job 观察、内存队列、Webhook / SMTP 与测试
 │   ├── naming/naming.go                ← Task 名称长度唯一常量（46）
 │   ├── workflow/dag.go                 ← DAG 校验、拓扑排序、分层、子 Task 命名
 │   ├── testutil/                       ← envtest 跨平台停止与 Windows 孤儿进程清理
@@ -267,6 +267,13 @@ API 修改 spec/metadata 用 `Update()`；Trigger 还会单独调用 `Status().U
 - 全局配置为 webhook-enabled/url/timeout/max-retries，默认关闭；Helm 通过已有 Secret 的 secretKeyRef 注入 URL，不增加读取 Secret API 的权限。
 - 不记录完整 URL、请求/响应正文或原始网络错误；不要将通知重试失败传回 Task / Workflow 状态或阻塞 Reconcile。设计、协议及真实集群待验收步骤见 PROJECT_PLAN.md 的 P2.3。
 
+### SMTP 邮件通知
+
+- SMTP 与 Webhook 分别注册观察器，复用 Job informer；各渠道维护独立队列和投递状态。smtp-enabled 默认关闭，邮件使用同样的 Job 最终失败与超时事件。
+- 传输支持 STARTTLS / 隐式 TLS，验证证书；可选 AUTH PLAIN。Helm 从已有 Secret 注入用户名和密码。配置更新后重启 Pod。
+- 多收件人全部接受后才提交 DATA。4xx 与 DATA 完成前的连接故障可重试，5xx 终止；提交后的回执丢失以 smtp_ack_unknown 终止重发。日志仅记录阶段和状态码。
+- 邮件主题 / 纯文本正文支持 Go text/template，主题换行和执行错误终止该邮件。按现有队列边界提供尽力投递，真实邮箱结果独立验收。
+
 ---
 
 ## 判断原则：以已有的 CRD 与 Controller 为准
@@ -317,5 +324,7 @@ API 修改 spec/metadata 用 `Update()`；Trigger 还会单独调用 `Status().U
 - 文档更新以代码为准；历史验收保留原日期和证据，本次结果写入项目状态记录。
 - 核对文档时若其他工作仍在改同一工作区，结束前复验并注明结果对应当前快照。
 
-### Step 4: Final Verification
-完整流水线: `go build ./... ; go vet ./... ; controller-gen ... ; go test ./...`
+### Step 4: Final Verification & Commit Gate
+- 每次创建提交前，先在仓库根目录执行 `go fmt ./...`。检查格式化差异，仅将本次范围内的改动纳入提交；已暂存的文件若被格式化，必须重新暂存。
+- 提交涉及 Go 源码、测试、依赖或 Go 检查配置时，格式化后运行上面的完整验证流水线，并用与 `.github/workflows/lint.yml` 一致的定制 `golangci-lint`（含 `logcheck`，按 `Makefile` 和 `.custom-gcl.yml` 构建）执行 `config verify` 和 `run`。Windows 直接调用定制二进制；`go vet` 不能代替 CI lint。
+- 所有适用检查通过后才能提交。提交前检查 `git diff --cached --check`，确认暂存内容与通过验证的版本一致；修复或重新格式化后重跑受影响的检查。失败或无法运行时，报告具体原因，先不要提交。

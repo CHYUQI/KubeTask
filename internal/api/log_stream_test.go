@@ -77,7 +77,7 @@ func TestAuthenticatedLogStreamContinuesAfterAuthenticationTimeout(t *testing.T)
 	var accessCalls atomic.Int32
 	z := routerAuthorizerFunc(func(_ context.Context, _ *authenticationv1.UserInfo, attributes authorizationv1.ResourceAttributes) error {
 		accessCalls.Add(1)
-		if attributes.Resource == "pods" && (attributes.Namespace != testLogNamespace || attributes.Name != "stream-pod" || attributes.Subresource != "log" || attributes.Verb != "get") {
+		if attributes.Resource == "pods" && (attributes.Namespace != testLogNamespace || attributes.Name != "stream-pod" || attributes.Subresource != "log" || attributes.Verb != testGetVerb) {
 			t.Error("log authorization must check the actual Pod and namespace")
 		}
 		return nil
@@ -101,17 +101,7 @@ func TestAuthenticatedLogStreamContinuesAfterAuthenticationTimeout(t *testing.T)
 		t.Fatal("expected an authenticated SSE response")
 	}
 	reader := bufio.NewReader(resp.Body)
-	readEvent := func(want string) {
-		t.Helper()
-		line, err := reader.ReadString('\n')
-		if err != nil || line != "data: "+want+"\n" {
-			t.Fatalf("live SSE event was not delivered: %v", err)
-		}
-		if separator, err := reader.ReadString('\n'); err != nil || separator != "\n" {
-			t.Fatal("invalid SSE event separator")
-		}
-	}
-	readEvent("first")
+	assertLogStreamEvent(t, reader, "first")
 	timer := time.NewTimer(3200 * time.Millisecond)
 	defer timer.Stop()
 	select {
@@ -120,7 +110,7 @@ func TestAuthenticatedLogStreamContinuesAfterAuthenticationTimeout(t *testing.T)
 		t.Fatal("request ended before the authentication timeout boundary")
 	}
 	close(second)
-	readEvent("second")
+	assertLogStreamEvent(t, reader, "second")
 	if calls.Load() != 1 {
 		t.Errorf("authentication calls = %d, want one per SSE request", calls.Load())
 	}
@@ -151,4 +141,15 @@ func TestAuthenticatedLogStreamContinuesAfterAuthenticationTimeout(t *testing.T)
 			t.Fatalf("expected final event and natural EOF; status %d, body %q, error %v", resp.StatusCode, body, err)
 		}
 	})
+}
+
+func assertLogStreamEvent(t *testing.T, reader *bufio.Reader, want string) {
+	t.Helper()
+	line, err := reader.ReadString('\n')
+	if err != nil || line != "data: "+want+"\n" {
+		t.Fatalf("live SSE event was not delivered: %v", err)
+	}
+	if separator, err := reader.ReadString('\n'); err != nil || separator != "\n" {
+		t.Fatal("invalid SSE event separator")
+	}
 }

@@ -83,7 +83,7 @@ func startNotificationManager(t *testing.T, cfg *rest.Config, scheme *runtime.Sc
 		t.Fatal(err)
 	}
 	c := &registrationCache{Cache: mgr.GetCache(), registered: make(chan toolscache.ResourceEventHandlerRegistration, 1)}
-	d := newDispatcher(mgr.GetCache(), Options{URL: url, Timeout: time.Second}, logr.Discard())
+	d := newDispatcher(mgr.GetCache(), newWebhook(Options{URL: url, Timeout: time.Second}), 0, logr.Discard())
 	if err := mgr.Add(&observer{cache: c, dispatcher: d}); err != nil {
 		t.Fatal(err)
 	}

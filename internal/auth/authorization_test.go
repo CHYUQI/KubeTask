@@ -16,8 +16,11 @@ import (
 )
 
 const (
-	testTaskResource = "tasks"
-	testReviewDetail = "internal-review-detail"
+	testTaskResource         = "tasks"
+	testReviewDetail         = "internal-review-detail"
+	testAuthenticatedGroup   = "system:authenticated"
+	testServiceAccountsGroup = "system:serviceaccounts"
+	testTeamAGroup           = "system:serviceaccounts:team-a"
 )
 
 type subjectAccessReviewFunc func(context.Context, *authorizationv1.SubjectAccessReview, metav1.CreateOptions) (*authorizationv1.SubjectAccessReview, error)
@@ -43,7 +46,7 @@ func TestResourceAuthorizerRequest(t *testing.T) {
 	user := authenticationv1.UserInfo{
 		Username: testServiceAccount,
 		UID:      "authorization-account-uid",
-		Groups:   []string{"system:serviceaccounts", "system:serviceaccounts:team-a", "system:authenticated"},
+		Groups:   []string{testServiceAccountsGroup, testTeamAGroup, testAuthenticatedGroup},
 		Extra:    map[string]authenticationv1.ExtraValue{"credential": {"first", "second"}},
 	}
 	type contextKey struct{}

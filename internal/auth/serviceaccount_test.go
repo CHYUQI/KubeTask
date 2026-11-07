@@ -56,7 +56,7 @@ func TestServiceAccountAuthenticatorRequestAndIdentity(t *testing.T) {
 	wantUser := authenticationv1.UserInfo{
 		Username: testServiceAccount,
 		UID:      "account-uid",
-		Groups:   []string{"system:serviceaccounts", "system:serviceaccounts:team-a", "system:authenticated"},
+		Groups:   []string{testServiceAccountsGroup, testTeamAGroup, testAuthenticatedGroup},
 		Extra:    map[string]authenticationv1.ExtraValue{"authentication.kubernetes.io/credential-id": {"credential-id"}},
 	}
 	type contextKey struct{}

@@ -76,9 +76,7 @@ func Audit(events eventsclient.EventsGetter) gin.HandlerFunc {
 			reason = "APIRequestDenied"
 		}
 		event := &eventsv1.Event{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: namespace, GenerateName: "kubetask-audit-",
-			},
+			Namespace: namespace, GenerateName: "kubetask-audit-",
 			EventTime:           metav1.MicroTime{Time: time.Now()},
 			ReportingController: "kubetask.io/api-audit",
 			ReportingInstance:   instance,

@@ -8,7 +8,7 @@ KubeTask 用自定义资源（CRD）描述任务与工作流：`Task` 由 Contro
 
 > 定位：轻量、可扩展、易部署，适用于中小团队、边缘计算（k3s）与云原生学习实践。
 
-当前工作区（2026-11-05）：已实现 Workflow 编排与视图、Helm 认证配置、RBAC 授权、可选 Namespace 租户隔离、CI/CD API Key、Events 审计与全局 Webhook MVP。P2.2/P2.3 的完整部署验收仍待完成；本地和远端跟踪分支的差异及验证范围见 [项目状态](docs/PROJECT_STATUS.md)。
+当前工作区（2026-11-07）：已实现 Workflow 编排与视图、Helm 认证配置、RBAC 授权、可选 Namespace 租户隔离、CI/CD API Key、Events 审计、全局 Webhook 与 SMTP 邮件告警。P2.2/P2.3 的完整部署验收仍待完成，资源感知调度已移至 v0.3.0。验证范围见 [项目状态](docs/PROJECT_STATUS.md)。
 
 ## 功能特性
 
@@ -39,7 +39,7 @@ KubeTask 用自定义资源（CRD）描述任务与工作流：`Task` 由 Contro
 - **SSE 流式日志**：通过 Kubernetes API 实时读取 Job Pod 日志，支持 `tail`、`sinceSeconds`、`follow`
 - **配置管理**：环境变量 > YAML > 默认值（Viper，`KUBETASK_` 前缀），认证项额外支持显式 Flag 覆盖
 - **可选认证与授权**：ServiceAccount TokenReview + SubjectAccessReview RBAC，Web UI 在内存中设置/清除 Token，兼容普通 API 和 fetch SSE；接口按调用者资源权限放行
-- **全局 Webhook**：可选的 Task 执行失败/超时 JSON 通知，包含 Workflow 子任务上下文；异步队列、去重与有限重试，尽力投递
+- **全局通知**：Task 执行失败和超时可通过 Webhook 或 SMTP 邮件告警，包含 Workflow 子任务上下文。各渠道使用独立队列、去重和有限重试，提供尽力投递。
 - **结构化日志**：Zap，支持 console / JSON 格式
 - **可观测性**：controller-runtime Metrics、健康检查 `/healthz`、就绪检查 `/readyz`
 - **Standalone 模式**：未开启认证且无法加载 Kubernetes 配置时，仅 `/healthz` 返回 200，其余请求返回 503 提示
@@ -417,6 +417,44 @@ helm upgrade --install kubetask ./charts/kubetask --namespace default \
 
 Secret 默认 key 为 `url`，可用 `webhook.existingSecret.key` 修改；Chart 不代建 Secret。配置变更后重启 Pod，已有部署也需要先使用包含通知实现的新构建镜像，Chart 默认镜像标签仍是 `v0.1.0`。
 
+如需通过企业微信群机器人收取告警，可先用独立的 [企微转发脚本](deploy/wecom_relay.py)。通过环境变量 `WECOM_WEBHOOK_URL` 注入群机器人地址，然后运行 `python deploy/wecom_relay.py`。在同一台机器上，将 KubeTask 的 `webhook-url` 指向 `http://127.0.0.1:8090/hooks/kubetask`。如果 KubeTask 在集群内，使用 `--host` 配置监听地址，并填写 KubeTask Pod 可访问的内网 URL。脚本默认只监听本机，供可信调用方使用。
+
+脚本使用 Python 3 标准库，将失败和超时事件转换为企微文本。企微返回 `errcode: 0` 后脚本才确认成功。限流和临时传输故障交由 KubeTask 重试，企微拒绝消息时返回 `422`。
+
+### 邮件告警
+
+开启 `smtp-enabled` 后，同样的任务失败和超时事件可直接通过 SMTP 发给运维邮箱。邮件和 Webhook 各用独立队列和重试状态，两个开关可分别启用。默认邮件包含 Task、Namespace、Job、失败原因、事件 ID 和可选 Workflow 节点。
+
+| YAML 配置 | 环境变量 | 默认值与用途 |
+| --- | --- | --- |
+| `smtp-enabled` | `KUBETASK_SMTP_ENABLED` | `false` |
+| `smtp-address` | `KUBETASK_SMTP_ADDRESS` | 开启时填写 SMTP `host:port` |
+| `smtp-tls` | `KUBETASK_SMTP_TLS` | `starttls`，也支持 `implicit` |
+| `smtp-username` / `smtp-password` | `KUBETASK_SMTP_USERNAME` / `KUBETASK_SMTP_PASSWORD` | 同时设置以启用 AUTH PLAIN；均为空时使用 SMTP 中继 |
+| `smtp-from` | `KUBETASK_SMTP_FROM` | 开启时填写发件地址 |
+| `smtp-to` | `KUBETASK_SMTP_TO` | YAML 地址数组；环境变量使用英文逗号分隔 |
+| `smtp-timeout` | `KUBETASK_SMTP_TIMEOUT` | `10s`，单次投递最多 1–60 秒 |
+| `smtp-max-retries` | `KUBETASK_SMTP_MAX_RETRIES` | `3`，额外重试 0–5 次 |
+| `smtp-subject-template` / `smtp-body-template` | `KUBETASK_SMTP_SUBJECT_TEMPLATE` / `KUBETASK_SMTP_BODY_TEMPLATE` | 留空使用内置模板 |
+
+发件人与收件人使用单个 ASCII 邮箱地址。STARTTLS 常用端口 587，隐式 TLS 常用端口 465，两种模式均验证服务器证书。已有 SMTP Secret 保存 `username` 和 `password` 两项，Helm values 可配置为下面的形式。
+
+```yaml
+smtp:
+  enabled: true
+  address: smtp.example.com:587
+  tls: starttls
+  from: alerts@example.com
+  to:
+    - ops@example.com
+  existingSecret:
+    name: kubetask-smtp
+```
+
+邮件主题和正文支持 Go `text/template`，数据结构与通用 Webhook 的 `Event` 相同。可用 `.Type`、`.Task.Name`、`.Execution.Namespace`、`.Execution.JobName`、`.Execution.Reason`、`.ID`。Workflow 上下文通过 `{{if .Workflow}}...{{end}}` 判断。模板语法错误在启动时报告，执行失败或主题包含换行时终止该邮件。Helm 对应 `smtp.subjectTemplate` / `smtp.bodyTemplate`，配置更新后重启 Pod。
+
+SMTP 4xx 和 DATA 提交完成前的连接故障可重试，5xx 拒收终止。多收件人全部被接受后才提交正文，重试保留同一 Message-ID。DATA 提交后的回执丢失时停止重发，日志记录 `smtp_ack_unknown`。SMTP 服务器接受邮件后记录成功，后续投递由邮件服务器处理。队列和重启边界沿用全局 Webhook 的尽力投递语义。
+
 ## 项目结构
 
 ```
@@ -432,7 +470,7 @@ kubetask/
 │   ├── logger/                     # Zap 结构化日志
 │   ├── auth/                       # TokenReview、API Key 与 SubjectAccessReview
 │   ├── tenant/                     # 租户标签、请求范围与 Job 定位
-│   ├── notification/               # Job 失败观察、全局 Webhook 队列与投递
+│   ├── notification/               # Job 失败观察、Webhook / SMTP 队列与投递
 │   ├── naming/                     # Task 名称长度唯一常量
 │   ├── controller/                 # Task / Workflow Reconciler + envtest 测试
 │   ├── workflow/                   # DAG 校验 / 拓扑排序 / 并行分层（纯逻辑包 + 单元测试）
@@ -498,7 +536,7 @@ go test ./... -count=1
 | 版本 | 内容 | 状态 |
 |------|------|------|
 | **v0.1.0** | MVP：Task CRD + Controller + REST API + Web UI（同端口打包）+ Helm/k3s 部署源码 | ✅ 核心已实现 |
-| **v0.2.0** | Workflow + 认证/多租户 + 告警/调度增强 | 🚧 部分完成 |
+| **v0.2.0** | Workflow + 认证/多租户 + 通知告警 | 🚧 部分完成 |
 | ↳ | Workflow CRD 类型、CEL 校验、CRD / RBAC / 样例生成 | ✅ 已完成 |
 | ↳ | `internal/workflow` DAG 校验、拓扑库与子 Task 命名 | ✅ 已完成 |
 | ↳ | Workflow Reconciler：子 Task 编排、状态回写、失败传播、`maxParallel` 限流、删除清理 | ✅ 已完成 |
@@ -506,8 +544,8 @@ go test ./... -count=1
 | ↳ | ServiceAccount 身份认证 + Web UI Token / SSE 接入 | ✅ 已实现，默认关闭 |
 | ↳ | RBAC 资源授权 | ✅ 已接入业务 API，本地 envtest 通过 |
 | ↳ | Helm 认证、Namespace 隔离、API Key、Events 审计 | ✅ 已实现；[配置说明](docs/API.md#11-认证配置与路由接入) |
-| ↳ | Webhook/钉钉/企微告警、资源感知调度 | 📋 规划中 |
-| **v0.3.0** | 多集群管理（k3s + ACK 云边协同）、智能错峰调度、Prometheus + Grafana 可观测性 | 📋 规划中 |
+| ↳ | SMTP 邮件、邮件模板、通用 Webhook、企微转发 | 🚧 真实部署待验收 |
+| **v0.3.0** | 多集群管理（k3s + ACK 云边协同）、资源感知与智能错峰调度、Prometheus + Grafana 可观测性 | 📋 规划中 |
 
 详细设计见 [PROJECT_PLAN.md](PROJECT_PLAN.md)。
 

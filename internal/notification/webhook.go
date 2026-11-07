@@ -3,6 +3,7 @@ package notification
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -22,12 +23,6 @@ type webhook struct {
 	client *http.Client
 }
 
-type attemptResult struct {
-	status int
-	retry  bool
-	reason string
-}
-
 func newWebhook(opts Options) *webhook {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	return &webhook{
@@ -38,6 +33,10 @@ func newWebhook(opts Options) *webhook {
 		},
 	}
 }
+
+func (*webhook) encode(e Event) ([]byte, error) { return json.Marshal(e) }
+
+func (w *webhook) close() { w.client.CloseIdleConnections() }
 
 func (w *webhook) send(ctx context.Context, id string, body []byte) attemptResult {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.url, bytes.NewReader(body))
@@ -63,9 +62,10 @@ func (w *webhook) send(ctx context.Context, id string, body []byte) attemptResul
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8<<10))
 	_ = resp.Body.Close()
 	return attemptResult{
-		status: resp.StatusCode,
-		retry:  resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode >= 500 && resp.StatusCode <= 599),
-		reason: "http_status",
+		status:    resp.StatusCode,
+		delivered: resp.StatusCode >= 200 && resp.StatusCode <= 299,
+		retry:     resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode >= 500 && resp.StatusCode <= 599),
+		reason:    "http_status",
 	}
 }
 

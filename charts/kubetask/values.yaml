@@ -35,6 +35,22 @@ webhook:
     name: ""
     key: url
 
+smtp:
+  enabled: false
+  address: "" # host:port, usually 587 for STARTTLS or 465 for implicit TLS
+  tls: starttls
+  from: ""
+  to: []
+  timeout: 10s
+  maxRetries: 3
+  subjectTemplate: ""
+  bodyTemplate: ""
+  # Leave name empty when the SMTP relay accepts clients without SMTP AUTH.
+  existingSecret:
+    name: ""
+    usernameKey: username
+    passwordKey: password
+
 resources:
   limits:
     cpu: 500m

@@ -1,5 +1,31 @@
 # KubeTask 项目状态
 
+## 2026-11-07 SMTP 告警与版本计划收尾
+
+本次结果对应本地 HEAD `f841e74` 加当前工作区。中英文 README、计划书和 Agent 指南已同步 SMTP、邮件模板、Helm Secret 接入与独立企微转发脚本。节点实际 CPU/Mem 负载感知调度移至 v0.3.0 的 P3.2，v0.2.0 聚焦通知告警。SMTP 的 DATA 回执丢失时采用停止重发的策略，日志记录 `smtp_ack_unknown`。
+
+Windows amd64、Go 1.27.3 下完成编译、vet、controller-gen、生成后编译与 Kubernetes 1.35.0 envtest 的默认全量测试，使用 `-p 1` 控制并行度，全部通过。通知模块的完整 race 检查通过。定制 golangci-lint v2.15.0 含 logcheck，`config verify` 和全仓库 `run` 通过，结果为 0 issues。为完成 lint，统一认证测试组常量、抽取 SSE 与租户审计断言，并规范相关字面量及格式。
+
+Helm lint 与默认 / 双渠道 / SMTP 中继渲染通过，核对模板换行保留、收件人列表、Secret 引用和 ConfigMap 校验和更新。生成的 CRD、RBAC、DeepCopy 及 Go 依赖无内容差异。真实 SMTP 收件箱、企微群和真实集群部署仍待联合验收。
+
+## 2026-11-07 调度计划与 SMTP 收工快照
+
+按本次决定，将按节点实际 CPU/Mem 负载的资源感知调度移入 v0.3.0 的 P3.2。通知新增 SMTP 邮件、STARTTLS / 隐式 TLS、可选 AUTH PLAIN、多收件人、主题与正文模板及 Helm Secret 接入。Webhook 与邮件分别维护队列、去重和重试状态。改动保留在当前工作区。
+
+配置包与通知包的完整测试通过，包含本地 SMTP 替身、TLS、暂时拒收重试、永久拒收、提交回执丢失、取消、证书验证、模板和现有 informer envtest。当前提供的 golangci-lint 二进制缺少 logcheck 插件；按用户收工要求停止定制二进制构建。
+
+下次继续收尾。核对中英文路线图和计划书页尾的一致性，完成 Go 编译 / vet / 生成 / 再次编译 / 全量测试、通知 race、定制 lint 和 Helm 渲染检查，再记录最终结果。SMTP 与真实收件箱尚待联调。
+
+## 2026-11-07 企微告警转发脚本
+
+新增 [独立 Python 转发脚本](../deploy/wecom_relay.py)。脚本接收现有任务失败和超时 Webhook，转换为企业微信群机器人文本消息。企微返回 `errcode: 0` 后脚本才确认成功，限流和临时传输故障交由 KubeTask 重试。机器人 URL 从 `WECOM_WEBHOOK_URL` 读取。
+
+在 Windows 上通过本机 HTTP 模拟验证消息格式、业务拒绝、限流、连接失败、重定向和长度限制，未向真实企微群发送。Go 编译、`vet`、生成及再次编译通过，生成物无差异。默认并行测试在链接阶段遇到内存不足，改用 Kubernetes 1.35.0 envtest 资产和 `go test -p 1 ./... -count=1` 串行复跑后全量通过。
+
+## 2026-11-05 API 测试 lint 修复
+
+API 测试共用请求路径、RBAC 动词、任务名和统计断言的常量。使用 golangci-lint v2.15.0 按 Linux 目标检查 `./internal/api/...`，`goconst` 报告 0 条问题。Windows 上的 Go 编译、`vet`、重新生成、再次编译及默认 Go 测试均通过。
+
 ## 2026-11-05 当前快照
 
 本地 `main` 已在 `f00429f` 合入 SSE EOF 修复，保留 P2.2 的租户定位和实际 Pod 授权。复跑更新后的本地日志连接测试，跨认证超时、客户端取消和最后事件后自然 EOF 均通过。11-02 的真实 Pod 回归是修复分支的历史证据，未在合并快照上重跑。P2.2 与 P2.3 的完整部署验收仍待完成。

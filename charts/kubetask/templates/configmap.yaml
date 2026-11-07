@@ -29,3 +29,12 @@ data:
     webhook-enabled: {{ .Values.webhook.enabled }}
     webhook-timeout: {{ .Values.webhook.timeout | quote }}
     webhook-max-retries: {{ .Values.webhook.maxRetries }}
+    smtp-enabled: {{ .Values.smtp.enabled }}
+    smtp-address: {{ .Values.smtp.address | quote }}
+    smtp-tls: {{ .Values.smtp.tls | quote }}
+    smtp-from: {{ .Values.smtp.from | quote }}
+    smtp-to: {{ .Values.smtp.to | toJson }}
+    smtp-timeout: {{ .Values.smtp.timeout | quote }}
+    smtp-max-retries: {{ .Values.smtp.maxRetries }}
+    smtp-subject-template: {{ .Values.smtp.subjectTemplate | quote }}
+    smtp-body-template: {{ .Values.smtp.bodyTemplate | quote }}
