@@ -1,5 +1,16 @@
 # KubeTask 项目状态
 
+## 2026-11-07 MVP 范围收敛
+
+本次结果对应本地 HEAD `2fbc626` 加本轮文档修改。根据维护者决定，从 MVP 未完成清单中移除 Task 生命周期 Events 和 Web Task 编辑表单；两项要求取消，不标记为已实现，也不自动顺延到后续版本。
+
+- **Task 生命周期 Events**：`internal/controller/task_controller.go` 已通过 status 同步阶段、执行历史与累计成败次数，并记录日志；Task 详情和 SSE 日志提供现有查询入口。缺少专门的状态变更 Event 时间线影响排障便利性，不影响 Job 创建、状态推进或删除清理。现有 API 写操作 Events 审计继续保留，其用途与生命周期事件不同。
+- **Web Task 编辑表单**：`internal/api/router.go` 与 `internal/api/handler/task_handler.go` 已提供 `PUT /api/v1/tasks/:name`，用于更新 spec、标签和注解；Web 当前提供创建、查看、触发、暂停、恢复与删除。取消表单会让仅使用界面的用户修改任务时需要转用 API，不影响现有调度与 API 更新能力。
+
+本轮停止生命周期 Events 方案推进，仅调整计划范围；未修改 Controller、CRD、接口或前端实现。当前代码的 Kind 容器 E2E、P2.2/P2.3 真实部署及 MVP 非功能目标测量仍保留原有待验收状态，不能由本次范围调整视为通过。
+
+验证范围为文档差异与本地链接检查；本轮未运行 Go、前端或真实集群测试。历史验收日期及证据保持原样。
+
 ## 2026-11-07 SMTP 告警与版本计划收尾
 
 本次结果对应本地 HEAD `f841e74` 加当前工作区。中英文 README、计划书和 Agent 指南已同步 SMTP、邮件模板、Helm Secret 接入与独立企微转发脚本。节点实际 CPU/Mem 负载感知调度移至 v0.3.0 的 P3.2，v0.2.0 聚焦通知告警。SMTP 的 DATA 回执丢失时采用停止重发的策略，日志记录 `smtp_ack_unknown`。

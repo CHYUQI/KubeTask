@@ -58,6 +58,8 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 
 以下勾选表示代码已实现；本次测试、历史真实集群验收和部署验收分别记录在 [项目状态](docs/PROJECT_STATUS.md)，不以功能勾选代表生产验证。
 
+2026-11-07 范围调整：取消 Task 生命周期 Events 和 Web Task 编辑表单两项 MVP 要求。任务状态通过现有 status、执行历史与日志查看，修改任务使用 PUT API；调整依据见 [项目状态](docs/PROJECT_STATUS.md)。
+
 #### P1.1 项目骨架
 - [x] Kubebuilder v4 项目与 Task CRD（Cron / OneTime / Delay）
 - [x] Viper YAML / 环境变量配置，认证项支持显式 Flag 覆盖
@@ -70,7 +72,6 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 - [x] Job Complete/Failed 条件判终态，最近 10 条历史与累计成败计数
 - [x] Cron 并发策略 Allow / Forbid / Replace，暂停/恢复与手动触发
 - [x] Manager 信号处理与 HTTP 优雅关闭
-- [ ] Task 状态变更写入 K8s Events（当前 Controller 使用日志与 status）
 
 #### P1.3 REST API
 - [x] Gin 与 Controller 同进程，Task CRUD / trigger / suspend / resume
@@ -82,7 +83,6 @@ v0.1.0 MVP ──→ v0.2.0 进阶 ──→ v0.3.0 创新 ──→ v1.0.0 生�
 - [x] Vue 3 + Vite + 原生 SVG 图表，仪表盘、Task 列表/创建/详情、日志面板
 - [x] 任务 YAML 预览、执行历史、触发/暂停/恢复/删除
 - [x] Workflow 列表/创建/详情与 Dagre 自动布局、状态着色和节点跳转；删除仍使用 API / kubectl
-- [ ] Task 编辑表单（当前更新 spec 使用 PUT API）
 
 #### P1.5 日志系统
 - [x] Kubernetes `GetLogs()`，SSE 逐行传输
